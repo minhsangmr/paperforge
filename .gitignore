@@ -1,0 +1,38 @@
+# macOS / editors
+.DS_Store
+.idea/
+*.swp
+
+# VS Code local overrides
+.vscode/*.local.json
+
+# Secrets and local environment
+.env
+.env.*
+!.env.example
+
+# Python (must live only inside Linux container)
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+
+# Tests and tools
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# Runtime data
+artifacts/
+data/
+models/
+logs/
+*.sqlite3
+
+# Docker local overrides
+compose.local.yaml
