@@ -26,8 +26,6 @@ RUN apt-get update \
 
 WORKDIR /workspace
 
-# The dev target intentionally does not install dependencies at image-build time.
-# Source code is bind-mounted and `make bootstrap` creates uv.lock + .venv in Linux.
 FROM base AS dev
 
 ENV PAPERFORGE_ENVIRONMENT=development \
@@ -39,7 +37,20 @@ EXPOSE 8000
 
 CMD ["uv", "run", "uvicorn", "paperforge.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload", "--no-access-log"]
 
-# This target is built only after uv.lock exists and is committed.
+FROM base AS ingestion-dev
+
+RUN apt-get update \
+    && apt-get install --yes --no-install-recommends \
+    libgl1 \
+    libglib2.0-0 \
+    libgomp1 \
+    && rm -rf /var/lib/apt/lists/*
+
+ENV HF_HOME=/workspace/.cache/models/huggingface \
+    TORCH_HOME=/workspace/.cache/models/torch
+
+CMD ["sleep", "infinity"]
+
 FROM base AS builder
 
 COPY pyproject.toml uv.lock README.md LICENSE ./
