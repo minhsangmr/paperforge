@@ -1,0 +1,112 @@
+name: paperforge
+
+x-app-base: &app-base
+  build:
+    context: .
+    target: dev
+    args:
+      PYTHON_VERSION: "3.12"
+      UV_VERSION: "0.10.0"
+  init: true
+  env_file:
+    - .env
+  environment:
+    PAPERFORGE_ENVIRONMENT: ${PAPERFORGE_ENVIRONMENT:-development}
+    PAPERFORGE_LOG_LEVEL: ${PAPERFORGE_LOG_LEVEL:-INFO}
+    PAPERFORGE_HOST: 0.0.0.0
+    PAPERFORGE_PORT: 8000
+    PAPERFORGE_RELOAD: "true"
+  volumes:
+    - .:/workspace
+    - paperforge_venv:/workspace/.venv
+    - paperforge_uv_cache:/root/.cache/uv
+
+services:
+  workspace:
+    <<: *app-base
+    command: ["sleep", "infinity"]
+
+  api:
+    <<: *app-base
+    command:
+      - uv
+      - run
+      - uvicorn
+      - paperforge.main:app
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8000"
+      - --reload
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://localhost:8000/api/v1/health/live"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 10s
+
+  postgres:
+    image: postgres:16-bookworm
+    profiles: ["core"]
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-paperforge}
+      POSTGRES_USER: ${POSTGRES_USER:-paperforge}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-paperforge-local-only}
+    ports:
+      - "5432:5432"
+    volumes:
+      - paperforge_postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  redis:
+    image: redis:7-bookworm
+    profiles: ["core"]
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - paperforge_redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  opensearch:
+    image: opensearchproject/opensearch:2.19.1
+    profiles: ["search"]
+    environment:
+      discovery.type: single-node
+      plugins.security.disabled: "true"
+      bootstrap.memory_lock: "true"
+      OPENSEARCH_JAVA_OPTS: "-Xms512m -Xmx512m"
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+      nofile:
+        soft: 65536
+        hard: 65536
+    ports:
+      - "9200:9200"
+    volumes:
+      - paperforge_opensearch:/usr/share/opensearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl --fail --silent http://localhost:9200/_cluster/health >/dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+
+volumes:
+  paperforge_venv:
+  paperforge_uv_cache:
+  paperforge_postgres:
+  paperforge_redis:
+  paperforge_opensearch:
