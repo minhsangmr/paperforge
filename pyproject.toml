@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "paperforge"
-version = "0.2.0"
+version = "0.3.0"
 description = "A container-first agentic RAG system for academic papers."
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
@@ -23,10 +23,21 @@ dependencies = [
   "uvicorn[standard]>=0.34,<1",
 ]
 
+[project.optional-dependencies]
+ingestion = [
+  "docling>=2.96,<3",
+  "torch==2.13.0",
+  "torchvision==0.28.0",
+]
+
+[project.scripts]
+paperforge = "paperforge.cli:main"
+
 [dependency-groups]
 dev = [
   "mypy>=1.15,<2",
   "pytest>=8.3,<10",
+  "pytest-asyncio>=0.26,<2",
   "pytest-cov>=6,<8",
   "ruff>=0.11,<1",
 ]
@@ -36,16 +47,20 @@ where = ["src"]
 include = ["paperforge*"]
 
 [tool.pytest.ini_options]
-addopts = "-ra --strict-config --strict-markers -m 'not component'"
+addopts = "-ra --strict-config --strict-markers -m 'not component and not external and not docling'"
 testpaths = ["tests"]
+asyncio_mode = "auto"
 markers = [
   "component: requires Docker Compose infrastructure",
+  "external: calls a real external service",
+  "docling: requires the ingestion extra and local Docling models",
 ]
 
 [tool.coverage.run]
 branch = true
 source = ["paperforge"]
 omit = [
+  "src/paperforge/cli.py",
   "src/paperforge/infrastructure/bootstrap.py",
 ]
 
@@ -81,5 +96,14 @@ init_typed = true
 warn_required_dynamic_aliases = true
 
 [[tool.mypy.overrides]]
-module = ["opensearchpy.*", "redis.*"]
+module = ["docling.*", "opensearchpy.*", "redis.*"]
 ignore_missing_imports = true
+
+[tool.uv.sources]
+torch = { index = "pytorch-cpu" }
+torchvision = { index = "pytorch-cpu" }
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true

@@ -1,6 +1,7 @@
 """Typed application configuration."""
 
 from functools import lru_cache
+from pathlib import Path
 from typing import Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -62,6 +63,39 @@ class OllamaSettings(FrozenSettingsModel):
     timeout_seconds: float = Field(default=3.0, gt=0, le=60)
 
 
+class ArxivSettings(FrozenSettingsModel):
+    """arXiv API and local PDF-cache settings."""
+
+    base_url: str = "https://export.arxiv.org/api/query"
+    category: str = "cs.AI"
+    max_results: int = Field(default=15, ge=1, le=2000)
+    request_timeout_seconds: float = Field(default=30.0, gt=0, le=300)
+    rate_limit_seconds: float = Field(default=3.0, ge=3.0, le=60)
+    max_retries: int = Field(default=3, ge=1, le=10)
+    retry_backoff_seconds: float = Field(default=2.0, gt=0, le=60)
+    user_agent: str = "paperforge/0.3.0"
+    pdf_cache_dir: Path = Path("/workspace/data/arxiv_pdfs")
+    max_pdf_download_mb: int = Field(default=25, ge=1, le=200)
+
+
+class DocumentParserSettings(FrozenSettingsModel):
+    """Docling parsing limits and feature switches."""
+
+    enabled: bool = True
+    max_pages: int = Field(default=30, ge=1, le=500)
+    max_file_size_mb: int = Field(default=20, ge=1, le=200)
+    do_ocr: bool = False
+    do_table_structure: bool = True
+
+
+class IngestionSettings(FrozenSettingsModel):
+    """Concurrency and retention settings for the ingestion pipeline."""
+
+    max_concurrent_downloads: int = Field(default=2, ge=1, le=10)
+    max_concurrent_parses: int = Field(default=1, ge=1, le=4)
+    pdf_retention_days: int = Field(default=30, ge=1, le=365)
+
+
 class Settings(BaseSettings):
     """Environment-driven settings for Paperforge."""
 
@@ -86,6 +120,9 @@ class Settings(BaseSettings):
     opensearch: OpenSearchSettings = Field(default_factory=OpenSearchSettings)
     redis: RedisSettings = Field(default_factory=RedisSettings)
     ollama: OllamaSettings = Field(default_factory=OllamaSettings)
+    arxiv: ArxivSettings = Field(default_factory=ArxivSettings)
+    document_parser: DocumentParserSettings = Field(default_factory=DocumentParserSettings)
+    ingestion: IngestionSettings = Field(default_factory=IngestionSettings)
 
 
 @lru_cache

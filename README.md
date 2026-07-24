@@ -1,48 +1,67 @@
 # Paperforge
 
-Paperforge is a container-first academic-paper search and agentic RAG platform.
-It is rebuilt incrementally from an MIT-licensed educational template, with Linux
-containers as the only Python execution environment.
+Paperforge is a container-first academic-paper ingestion and RAG project rebuilt from a course template with a production-oriented architecture.
 
-## Current milestone: Week 1
+## Current milestone: Week 2
 
-- Dockerized Python 3.12 and uv development environment
-- FastAPI liveness and dependency-aware readiness endpoints
-- Typed nested Pydantic settings
-- PostgreSQL through SQLAlchemy 2 and psycopg 3
-- Alembic-managed `papers` schema; no runtime `create_all()`
-- Idempotent OpenSearch index bootstrap
-- Optional Redis and Ollama health adapters
-- JSON structured logging and `X-Request-ID` propagation
-- Unit and Compose-backed component tests
-- OpenSearch Dashboards behind an opt-in Compose profile
+The repository currently provides:
 
-## Container-only rule
+- FastAPI liveness/readiness.
+- PostgreSQL, Alembic, Redis, and OpenSearch.
+- Structured logging and request IDs.
+- A rate-limited arXiv Atom client.
+- Persistent and atomically written PDF cache.
+- Docling parsing with CPU-only PyTorch in an isolated Linux environment.
+- Transactional PostgreSQL paper upserts.
+- A container-only ingestion CLI.
+- An Airflow 3 daily ingestion DAG.
+- Unit, component, external, and Docling test tiers.
 
-The macOS host runs only VS Code, Git, Docker Desktop, Make, curl, and shell
-commands. Do not run Python, uv, Alembic, Pytest, Ruff, MyPy, or Uvicorn directly
-on macOS.
+## Development rules
 
-## Start the Week 1 stack
+- macOS runs only VS Code, Git, and Docker Desktop.
+- Python, uv, tests, FastAPI, Docling, PyTorch, and Airflow run in Linux containers.
+- `.venv` is stored in Docker volumes, never on the macOS host.
+- Docling/PyTorch are not installed in the lightweight API environment.
+
+## First run
 
 ```bash
 cp .env.example .env
-make bootstrap
-make up-week1
-make readiness
-make check
-make test-component
+make build
+make lock
+make sync
+make up-week2
+make ingest-metadata MAX_RESULTS=2
 ```
 
-Endpoints:
+Install the heavy ingestion extra:
 
-- API documentation: <http://localhost:8000/docs>
-- Liveness: <http://localhost:8000/api/v1/health/live>
-- Readiness: <http://localhost:8000/api/v1/health/ready>
-- OpenSearch: <http://localhost:9200>
+```bash
+make build-ingestion
+make sync-ingestion
+make ingest MAX_RESULTS=1
+```
 
-Start the optional search UI with `make up-search-ui`, then open
-<http://localhost:5601>.
+Start Airflow only when needed:
 
-Read [`docs/WEEK1_CORE_INFRASTRUCTURE.md`](docs/WEEK1_CORE_INFRASTRUCTURE.md) for
-the implementation, verification, testing, and commit sequence.
+```bash
+make up-airflow
+```
+
+Airflow UI:
+
+```text
+http://localhost:8080
+```
+
+## Documentation
+
+- `docs/WEEK0_SETUP.md`
+- `docs/WEEK1_CORE_INFRASTRUCTURE.md`
+- `docs/WEEK1_TO_WEEK2_COMPARISON.md`
+- `docs/WEEK2_ARXIV_INGESTION.md`
+
+## Attribution
+
+See `NOTICE.md` and `LICENSE` for the upstream course-template attribution and MIT terms.

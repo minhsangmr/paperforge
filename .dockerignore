@@ -18,3 +18,5 @@ htmlcov
 artifacts
 data
 models
+airflow/logs
+.cache

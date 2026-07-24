@@ -45,6 +45,28 @@ services:
       retries: 12
       start_period: 10s
 
+  ingestion:
+    build:
+      context: .
+      target: ingestion-dev
+      args:
+        PYTHON_VERSION: "3.12"
+        UV_VERSION: "0.10.0"
+    profiles: ["ingestion"]
+    init: true
+    env_file:
+      - .env
+    volumes:
+      - .:/workspace
+      - paperforge_ingestion_venv:/workspace/.venv
+      - paperforge_uv_cache:/root/.cache/uv
+      - paperforge_model_cache:/workspace/.cache/models
+      - paperforge_pdf_cache:/workspace/data/arxiv_pdfs
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: ["sleep", "infinity"]
+
   postgres:
     image: postgres:16-bookworm
     profiles: ["core"]
@@ -115,9 +137,71 @@ services:
     ports:
       - "5601:5601"
 
+  airflow-db-init:
+    profiles:
+      - ingestion
+    image: postgres:16-bookworm
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGHOST: postgres
+      PGUSER: paperforge
+      PGPASSWORD: paperforge-local-only
+      AIRFLOW_DB: paperforge_airflow
+    entrypoint:
+      - /bin/bash
+      - -ec
+    command:
+      - |
+        if ! psql \
+          -d postgres \
+          -Atqc "SELECT 1 FROM pg_database WHERE datname='$${AIRFLOW_DB}'" \
+          | grep -q '^1$'; then
+          createdb "$${AIRFLOW_DB}"
+        fi
+
+  airflow:
+    build:
+      context: .
+      dockerfile: airflow/Dockerfile
+      args:
+        AIRFLOW_VERSION: "3.3.0"
+        PYTHON_VERSION: "3.12"
+        UV_VERSION: "0.10.0"
+    profiles: ["ingestion"]
+    init: true
+    env_file:
+      - .env
+    environment:
+      AIRFLOW_HOME: /opt/airflow
+      AIRFLOW__CORE__DAGS_FOLDER: /opt/airflow/dags
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_ALL_ADMINS: "true"
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${POSTGRES_USER:-paperforge}:${POSTGRES_PASSWORD:-paperforge-local-only}@postgres:5432/${AIRFLOW_DB:-paperforge_airflow}
+      AIRFLOW__SCHEDULER__ENABLE_HEALTH_CHECK: "true"
+      PAPERFORGE_DATABASE__URL: postgresql+psycopg://${POSTGRES_USER:-paperforge}:${POSTGRES_PASSWORD:-paperforge-local-only}@postgres:5432/${POSTGRES_DB:-paperforge}
+      PAPERFORGE_ARXIV__PDF_CACHE_DIR: /workspace/data/arxiv_pdfs
+    depends_on:
+      airflow-db-init:
+        condition: service_completed_successfully
+    volumes:
+      - ./airflow/dags:/opt/airflow/dags:ro
+      - paperforge_airflow_logs:/opt/airflow/logs
+      - paperforge_model_cache:/workspace/.cache/models
+      - paperforge_pdf_cache:/workspace/data/arxiv_pdfs
+    ports:
+      - "8080:8080"
+    command: ["airflow", "standalone"]
+
 volumes:
   paperforge_venv:
+  paperforge_ingestion_venv:
   paperforge_uv_cache:
+  paperforge_model_cache:
+  paperforge_pdf_cache:
   paperforge_postgres:
   paperforge_redis:
   paperforge_opensearch:
+  paperforge_airflow_logs:
