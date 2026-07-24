@@ -1,35 +1,48 @@
 # Paperforge
 
 Paperforge is a container-first academic-paper search and agentic RAG platform.
-It is being rebuilt incrementally from an MIT-licensed educational template,
-with Linux containers as the only Python execution environment.
+It is rebuilt incrementally from an MIT-licensed educational template, with Linux
+containers as the only Python execution environment.
 
-## Week 0 status
+## Current milestone: Week 1
 
 - Dockerized Python 3.12 and uv development environment
-- VS Code Dev Container configuration
-- FastAPI liveness endpoint
-- Ruff, strict MyPy, Pytest, and coverage gates
-- Docker-based GitHub Actions CI
-- Optional Compose profiles reserved for PostgreSQL, Redis, and OpenSearch
+- FastAPI liveness and dependency-aware readiness endpoints
+- Typed nested Pydantic settings
+- PostgreSQL through SQLAlchemy 2 and psycopg 3
+- Alembic-managed `papers` schema; no runtime `create_all()`
+- Idempotent OpenSearch index bootstrap
+- Optional Redis and Ollama health adapters
+- JSON structured logging and `X-Request-ID` propagation
+- Unit and Compose-backed component tests
+- OpenSearch Dashboards behind an opt-in Compose profile
 
-## Non-negotiable development rule
+## Container-only rule
 
-The macOS host runs only VS Code, Git, Docker Desktop, Make, and shell commands.
-Do not run `python`, `uv`, `pytest`, `ruff`, `mypy`, or Uvicorn directly on macOS.
+The macOS host runs only VS Code, Git, Docker Desktop, Make, curl, and shell
+commands. Do not run Python, uv, Alembic, Pytest, Ruff, MyPy, or Uvicorn directly
+on macOS.
 
-## Start Week 0
+## Start the Week 1 stack
 
 ```bash
 cp .env.example .env
-make verify-host
-make bootstrap  # creates uv.lock inside Linux on the first run
-make up
+make bootstrap
+make up-week1
+make readiness
 make check
-make health
+make test-component
 ```
 
-Open API documentation at `http://localhost:8000/docs`.
+Endpoints:
 
-For the complete setup and first GitHub push, read
-[`docs/WEEK0_SETUP.md`](docs/WEEK0_SETUP.md).
+- API documentation: <http://localhost:8000/docs>
+- Liveness: <http://localhost:8000/api/v1/health/live>
+- Readiness: <http://localhost:8000/api/v1/health/ready>
+- OpenSearch: <http://localhost:9200>
+
+Start the optional search UI with `make up-search-ui`, then open
+<http://localhost:5601>.
+
+Read [`docs/WEEK1_CORE_INFRASTRUCTURE.md`](docs/WEEK1_CORE_INFRASTRUCTURE.md) for
+the implementation, verification, testing, and commit sequence.

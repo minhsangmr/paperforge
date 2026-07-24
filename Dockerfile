@@ -37,7 +37,7 @@ ENV PAPERFORGE_ENVIRONMENT=development \
 
 EXPOSE 8000
 
-CMD ["uv", "run", "uvicorn", "paperforge.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+CMD ["uv", "run", "uvicorn", "paperforge.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload", "--no-access-log"]
 
 # This target is built only after uv.lock exists and is committed.
 FROM base AS builder
@@ -70,4 +70,4 @@ USER paperforge
 
 EXPOSE 8000
 
-CMD ["uvicorn", "paperforge.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
+CMD ["uvicorn", "paperforge.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1", "--no-access-log"]

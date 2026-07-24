@@ -11,11 +11,8 @@ x-app-base: &app-base
   env_file:
     - .env
   environment:
-    PAPERFORGE_ENVIRONMENT: ${PAPERFORGE_ENVIRONMENT:-development}
-    PAPERFORGE_LOG_LEVEL: ${PAPERFORGE_LOG_LEVEL:-INFO}
     PAPERFORGE_HOST: 0.0.0.0
     PAPERFORGE_PORT: 8000
-    PAPERFORGE_RELOAD: "true"
   volumes:
     - .:/workspace
     - paperforge_venv:/workspace/.venv
@@ -38,6 +35,7 @@ services:
       - --port
       - "8000"
       - --reload
+      - --no-access-log
     ports:
       - "8000:8000"
     healthcheck:
@@ -62,7 +60,7 @@ services:
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 5s
       timeout: 5s
-      retries: 12
+      retries: 20
 
   redis:
     image: redis:7-bookworm
@@ -76,14 +74,15 @@ services:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
       timeout: 3s
-      retries: 12
+      retries: 20
 
   opensearch:
     image: opensearchproject/opensearch:2.19.1
     profiles: ["search"]
     environment:
       discovery.type: single-node
-      plugins.security.disabled: "true"
+      DISABLE_SECURITY_PLUGIN: "true"
+      DISABLE_INSTALL_DEMO_CONFIG: "true"
       bootstrap.memory_lock: "true"
       OPENSEARCH_JAVA_OPTS: "-Xms512m -Xmx512m"
     ulimits:
@@ -101,8 +100,20 @@ services:
       test: ["CMD-SHELL", "curl --fail --silent http://localhost:9200/_cluster/health >/dev/null"]
       interval: 10s
       timeout: 5s
-      retries: 20
+      retries: 30
       start_period: 30s
+
+  opensearch-dashboards:
+    image: opensearchproject/opensearch-dashboards:2.19.1
+    profiles: ["search-ui"]
+    depends_on:
+      opensearch:
+        condition: service_healthy
+    environment:
+      OPENSEARCH_HOSTS: '["http://opensearch:9200"]'
+      DISABLE_SECURITY_DASHBOARDS_PLUGIN: "true"
+    ports:
+      - "5601:5601"
 
 volumes:
   paperforge_venv:

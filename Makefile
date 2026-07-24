@@ -4,15 +4,15 @@ RUN_API := $(COMPOSE) run --rm --no-deps api
 
 .DEFAULT_GOAL := help
 
-.PHONY: help verify-host bootstrap build build-runtime up up-core up-search down reset ps logs shell sync lock format format-check lint typecheck test test-cov check health container-info compose-config
+.PHONY: help verify-host bootstrap build build-runtime up up-infra up-week1 up-search-ui wait-infra migrate migration search-init infra-init down reset ps logs shell sync lock format format-check lint typecheck test test-cov test-component check health readiness container-info compose-config
 
 help: ## Show available commands
-	@awk 'BEGIN {FS = ":.*## "; printf "\nPaperforge Week 0 commands:\n\n"} /^[a-zA-Z0-9_-]+:.*## / {printf "  %-18s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
+	@awk 'BEGIN {FS = ":.*## "; printf "\nPaperforge Week 1 commands:\n\n"} /^[a-zA-Z0-9_-]+:.*## / {printf "  %-20s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
-verify-host: ## Verify macOS host tools; never installs Python
+verify-host: ## Verify host tools; never installs Python
 	@bash scripts/verify-host.sh
 
-bootstrap: ## Create .env, build Linux dev image, create lock if needed, and sync
+bootstrap: ## Build Linux image and sync dependencies
 	@test -f .env || cp .env.example .env
 	$(COMPOSE) build api
 	@if test -f uv.lock; then \
@@ -24,49 +24,74 @@ bootstrap: ## Create .env, build Linux dev image, create lock if needed, and syn
 build: ## Build the development image
 	$(COMPOSE) build api
 
-build-runtime: ## Build the immutable production target; requires uv.lock
-	@test -f uv.lock || (echo "uv.lock is missing; run make bootstrap first" && exit 1)
+build-runtime: ## Build immutable production image
+	@test -f uv.lock || (echo "uv.lock is missing; run make lock" && exit 1)
 	docker build --target runtime --tag paperforge:local .
 
-up: ## Start only the Week 0 API
+up: ## Start only the API; readiness may report missing infrastructure
+	@test -f .env || cp .env.example .env
 	$(COMPOSE) up --build -d api
 
-up-core: ## Start API, PostgreSQL, and Redis
-	$(COMPOSE) --profile core up --build -d api postgres redis
+up-infra: ## Start PostgreSQL, Redis, and OpenSearch
+	@test -f .env || cp .env.example .env
+	$(COMPOSE) --profile core --profile search up -d postgres redis opensearch
+	@bash scripts/wait-for-infra.sh
 
-up-search: ## Start API and OpenSearch search profile
-	$(COMPOSE) --profile search up --build -d api opensearch
+up-week1: ## Start and initialize the complete Week 1 stack
+	@$(MAKE) up-infra
+	@$(MAKE) infra-init
+	$(COMPOSE) up --build -d api
+
+up-search-ui: ## Start OpenSearch and Dashboards
+	$(COMPOSE) --profile search --profile search-ui up -d opensearch opensearch-dashboards
+
+wait-infra: ## Wait until Week 1 infrastructure is healthy
+	@bash scripts/wait-for-infra.sh
+
+migrate: ## Apply Alembic migrations inside Linux
+	$(RUN_API) uv run alembic upgrade head
+
+migration: ## Create an Alembic migration; usage: make migration MSG="description"
+	@test -n "$(MSG)" || (echo 'Usage: make migration MSG="description"' && exit 1)
+	$(RUN_API) uv run alembic revision --autogenerate -m "$(MSG)"
+
+search-init: ## Idempotently bootstrap the OpenSearch index
+	$(RUN_API) uv run python -m paperforge.infrastructure.bootstrap
+
+infra-init: ## Apply database migrations and search bootstrap
+	@$(MAKE) migrate
+	@$(MAKE) search-init
 
 down: ## Stop containers without deleting data
-	$(COMPOSE) down
+	$(COMPOSE) --profile core --profile search --profile search-ui down
 
-reset: ## Stop containers and delete project volumes
-	$(COMPOSE) down --volumes --remove-orphans
+reset: ## Stop containers and delete all project volumes
+	$(COMPOSE) --profile core --profile search --profile search-ui down --volumes --remove-orphans
 
 ps: ## Show container status
-	$(COMPOSE) ps
+	$(COMPOSE) --profile core --profile search --profile search-ui ps
 
-logs: ## Follow API logs
-	$(COMPOSE) logs --follow api
+logs: ## Follow API and core service logs
+	$(COMPOSE) logs --follow api postgres redis opensearch
 
 shell: ## Open a one-off Linux shell
 	$(RUN_API) bash
 
 sync: ## Sync dependencies from committed uv.lock inside Linux
-	@test -f uv.lock || (echo "uv.lock is missing; run make bootstrap first" && exit 1)
+	@test -f uv.lock || (echo "uv.lock is missing; run make lock" && exit 1)
 	$(RUN_API) uv sync --frozen
 
 lock: ## Regenerate uv.lock inside Linux after dependency changes
 	$(RUN_API) uv lock
 
-format: ## Format source and tests inside Linux
-	$(RUN_API) uv run ruff format src tests
+format: ## Format Python source inside Linux
+	$(RUN_API) uv run ruff format src tests migrations
 
 format-check: ## Check formatting inside Linux
-	$(RUN_API) uv run ruff format --check src tests
+	$(RUN_API) uv run ruff format --check src tests migrations
 
-lint: ## Lint source and tests inside Linux
-	$(RUN_API) uv run ruff check src tests
+lint: ## Lint source inside Linux
+	$(RUN_API) uv run ruff check src tests migrations
 
 typecheck: ## Run strict mypy inside Linux
 	$(RUN_API) uv run mypy src tests
@@ -74,16 +99,24 @@ typecheck: ## Run strict mypy inside Linux
 test: ## Run unit tests inside Linux
 	$(RUN_API) uv run pytest
 
-test-cov: ## Run tests with coverage gate inside Linux
+test-cov: ## Run unit tests with coverage gate
 	$(RUN_API) uv run pytest --cov=paperforge --cov-report=term-missing
 
-check: format-check lint typecheck test-cov ## Run every Week 0 quality gate
+test-component: ## Run tests against real Compose services
+	@$(MAKE) up-infra
+	@$(MAKE) infra-init
+	$(RUN_API) uv run pytest -m component
 
-health: ## Check the running API from the Mac host
+check: format-check lint typecheck test-cov ## Run all local quality gates
+
+health: ## Check process liveness from the host
 	@curl --fail --silent http://localhost:8000/api/v1/health/live && echo
 
-container-info: ## Verify Python and uv are Linux-only
+readiness: ## Show dependency readiness from the host
+	@curl --silent --show-error http://localhost:8000/api/v1/health/ready | $(COMPOSE) run --rm -T --no-deps api uv run python -m json.tool
+
+container-info: ## Verify Python and uv are running on Linux
 	$(RUN_API) bash scripts/verify-container.sh
 
-compose-config: ## Validate the merged Compose model
-	$(COMPOSE) config --quiet
+compose-config: ## Validate the Compose model
+	$(COMPOSE) --profile core --profile search --profile search-ui config --quiet

@@ -20,7 +20,7 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@v6
 
       - name: Prepare local environment file
         run: cp .env.example .env
@@ -32,13 +32,57 @@ jobs:
         run: docker compose run --rm --no-deps api uv sync --frozen
 
       - name: Check formatting
-        run: docker compose run --rm --no-deps api uv run ruff format --check src tests
+        run: docker compose run --rm --no-deps api uv run ruff format --check src tests migrations
 
       - name: Lint
-        run: docker compose run --rm --no-deps api uv run ruff check src tests
+        run: docker compose run --rm --no-deps api uv run ruff check src tests migrations
 
       - name: Type-check
         run: docker compose run --rm --no-deps api uv run mypy src tests
 
       - name: Test with coverage
         run: docker compose run --rm --no-deps api uv run pytest --cov=paperforge --cov-report=term-missing
+
+  component:
+    name: Compose component tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Prepare local environment file
+        run: cp .env.example .env
+
+      - name: Build Linux development image
+        run: docker compose build api
+
+      - name: Sync locked dependencies inside Linux
+        run: docker compose run --rm --no-deps api uv sync --frozen
+
+      - name: Configure OpenSearch kernel requirement
+        run: sudo sysctl -w vm.max_map_count=262144
+
+      - name: Start infrastructure
+        run: docker compose --profile core --profile search up -d postgres redis opensearch
+
+      - name: Wait for infrastructure
+        run: bash scripts/wait-for-infra.sh
+
+      - name: Apply Alembic migrations
+        run: docker compose run --rm --no-deps api uv run alembic upgrade head
+
+      - name: Bootstrap OpenSearch
+        run: docker compose run --rm --no-deps api uv run python -m paperforge.infrastructure.bootstrap
+
+      - name: Run component tests
+        run: docker compose run --rm --no-deps api uv run pytest -m component
+
+      - name: Print service logs on failure
+        if: failure()
+        run: docker compose --profile core --profile search logs --no-color
+
+      - name: Stop services
+        if: always()
+        run: docker compose --profile core --profile search down --volumes
