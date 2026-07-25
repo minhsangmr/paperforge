@@ -2,45 +2,47 @@
 
 Paperforge is a container-first academic-paper ingestion and RAG project rebuilt from a course template with a production-oriented architecture.
 
-## Current milestone: Week 2
+## Current milestone: Week 3
 
 The repository currently provides:
 
-- FastAPI liveness/readiness.
+- FastAPI liveness/readiness and request tracing.
 - PostgreSQL, Alembic, Redis, and OpenSearch.
-- Structured logging and request IDs.
-- A rate-limited arXiv Atom client.
-- Persistent and atomically written PDF cache.
+- Rate-limited arXiv ingestion and persistent PDF caching.
 - Docling parsing with CPU-only PyTorch in an isolated Linux environment.
 - Transactional PostgreSQL paper upserts.
-- A container-only ingestion CLI.
-- An Airflow 3 daily ingestion DAG.
+- A versioned, paper-level OpenSearch BM25 index.
+- PostgreSQL-to-OpenSearch bulk synchronization with stable document IDs.
+- BM25 search across title, abstract, authors, and parsed full text.
+- Category/date filters, highlighting, pagination, exact arXiv-ID boost, and optional fuzzy fallback.
+- GET and POST `/api/v1/search` endpoints.
+- Container-only search CLI and Airflow indexing task.
 - Unit, component, external, and Docling test tiers.
 
 ## Development rules
 
 - macOS runs only VS Code, Git, and Docker Desktop.
-- Python, uv, tests, FastAPI, Docling, PyTorch, and Airflow run in Linux containers.
+- Python, uv, tests, FastAPI, Docling, PyTorch, OpenSearch tooling, and Airflow run in Linux containers.
 - `.venv` is stored in Docker volumes, never on the macOS host.
 - Docling/PyTorch are not installed in the lightweight API environment.
+- OpenSearch is derived state and can be rebuilt from PostgreSQL; PostgreSQL volumes must not be reset for a search-schema upgrade.
 
 ## First run
 
 ```bash
 cp .env.example .env
 make build
-make lock
 make sync
-make up-week2
-make ingest-metadata MAX_RESULTS=2
+make up-week3
+make search-stats
+make search-query Q="AI agents"
 ```
 
-Install the heavy ingestion extra:
+Ingest and immediately index a small metadata batch:
 
 ```bash
-make build-ingestion
-make sync-ingestion
-make ingest MAX_RESULTS=1
+make ingest-metadata MAX_RESULTS=3
+make search-index
 ```
 
 Start Airflow only when needed:
@@ -49,10 +51,13 @@ Start Airflow only when needed:
 make up-airflow
 ```
 
-Airflow UI:
+Service URLs:
 
 ```text
-http://localhost:8080
+FastAPI docs:              http://localhost:8000/docs
+OpenSearch:                http://localhost:9200
+OpenSearch Dashboards:     http://localhost:5601
+Airflow:                   http://localhost:8080
 ```
 
 ## Documentation
@@ -61,6 +66,8 @@ http://localhost:8080
 - `docs/WEEK1_CORE_INFRASTRUCTURE.md`
 - `docs/WEEK1_TO_WEEK2_COMPARISON.md`
 - `docs/WEEK2_ARXIV_INGESTION.md`
+- `docs/WEEK2_TO_WEEK3_COMPARISON.md`
+- `docs/WEEK3_BM25_SEARCH.md`
 
 ## Attribution
 
