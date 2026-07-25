@@ -3,7 +3,7 @@
 from collections.abc import Iterator
 from typing import Annotated, cast
 
-from fastapi import Depends, Request
+from fastapi import Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
 from paperforge.core.config import Settings, get_settings
@@ -12,6 +12,7 @@ from paperforge.infrastructure.opensearch import OpenSearchClient
 from paperforge.infrastructure.redis import RedisClient
 from paperforge.infrastructure.resources import Infrastructure
 from paperforge.services.health import HealthService
+from paperforge.services.search import SearchService
 
 SettingsDep = Annotated[Settings, Depends(get_settings)]
 
@@ -50,6 +51,20 @@ def get_opensearch(infrastructure: InfrastructureDep) -> OpenSearchClient | None
     return infrastructure.opensearch
 
 
+def require_opensearch(infrastructure: InfrastructureDep) -> OpenSearchClient:
+    """Return OpenSearch or fail with a stable service-unavailable response."""
+
+    if infrastructure.opensearch is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="search service is disabled",
+        )
+    return infrastructure.opensearch
+
+
+OpenSearchDep = Annotated[OpenSearchClient, Depends(require_opensearch)]
+
+
 def get_redis(infrastructure: InfrastructureDep) -> RedisClient | None:
     """Return the optional Redis adapter."""
 
@@ -72,3 +87,15 @@ def get_health_service(
 
 
 HealthServiceDep = Annotated[HealthService, Depends(get_health_service)]
+
+
+def get_search_service(
+    settings: SettingsDep,
+    client: OpenSearchDep,
+) -> SearchService:
+    """Build a request-scoped search application service."""
+
+    return SearchService(client, settings.opensearch)
+
+
+SearchServiceDep = Annotated[SearchService, Depends(get_search_service)]
