@@ -52,6 +52,7 @@ def create_app(
     )
     application.add_middleware(RequestIDMiddleware)
     application.include_router(api_router)
+    application.dependency_overrides[get_settings] = lambda: resolved_settings
     return application
 
 
