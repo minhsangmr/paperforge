@@ -40,6 +40,17 @@ class RedisClient:
 
         return int(self._client.ttl(key))
 
+    def increment(self, key: str, amount: int = 1) -> int:
+        """Increment one integer counter."""
+
+        return int(self._client.incrby(key, amount))
+
+    def get_many(self, keys: list[str]) -> list[str | None]:
+        """Read several string keys in one Redis round trip."""
+
+        values = self._client.mget(keys)
+        return [cast(str | None, value) for value in values]
+
     def delete(self, key: str) -> int:
         """Delete a cache key."""
 
