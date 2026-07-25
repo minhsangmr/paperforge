@@ -15,6 +15,8 @@ from paperforge.infrastructure.resources import Infrastructure
 from paperforge.services.embeddings.jina import JinaEmbeddingsClient
 from paperforge.services.health import HealthService
 from paperforge.services.hybrid_search import HybridSearchService
+from paperforge.services.ollama.client import OllamaClient
+from paperforge.services.rag import RAGService
 from paperforge.services.search import SearchService
 
 SettingsDep = Annotated[Settings, Depends(get_settings)]
@@ -141,3 +143,30 @@ def get_hybrid_search_service(
 
 
 HybridSearchServiceDep = Annotated[HybridSearchService, Depends(get_hybrid_search_service)]
+
+
+def require_ollama(infrastructure: InfrastructureDep) -> OllamaClient:
+    """Return Ollama or fail with a stable service-unavailable response."""
+
+    if infrastructure.ollama is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Ollama generation is disabled",
+        )
+    return infrastructure.ollama
+
+
+OllamaDep = Annotated[OllamaClient, Depends(require_ollama)]
+
+
+def get_rag_service(
+    settings: SettingsDep,
+    retrieval: HybridSearchServiceDep,
+    ollama: OllamaDep,
+) -> RAGService:
+    """Build the Week 5 grounded-generation service."""
+
+    return RAGService(retrieval, ollama, settings.rag)
+
+
+RAGServiceDep = Annotated[RAGService, Depends(get_rag_service)]
