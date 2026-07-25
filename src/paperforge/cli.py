@@ -1,19 +1,22 @@
-"""Container-only command line interface for ingestion operations."""
+"""Container-only command line interface for ingestion and search operations."""
 
 import argparse
 import asyncio
 import json
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from typing import NoReturn
 
 from paperforge.core.config import Settings, get_settings
 from paperforge.core.logging import configure_logging
-from paperforge.exceptions import IngestionPipelineError
+from paperforge.exceptions import IngestionPipelineError, SearchIndexSchemaError
 from paperforge.infrastructure.database import Database
+from paperforge.infrastructure.opensearch import OpenSearchClient
 from paperforge.repositories.paper import PaperRepository
+from paperforge.schemas.search import SearchRequest
 from paperforge.services.arxiv.client import ArxivClient
 from paperforge.services.documents.docling_parser import DoclingDocumentParser
 from paperforge.services.ingestion import IngestionService
+from paperforge.services.search_indexing import SearchIndexingService
 
 
 def _compact_date(value: str) -> str:
@@ -28,6 +31,21 @@ def _compact_date(value: str) -> str:
     return parsed.strftime("%Y%m%d")
 
 
+def _iso_date(value: str) -> date:
+    try:
+        return date.fromisoformat(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("date must be YYYY-MM-DD") from exc
+
+
+def _iso_datetime(value: str) -> datetime:
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("datetime must be ISO 8601") from exc
+    return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=UTC)
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="paperforge")
     subcommands = parser.add_subparsers(dest="command", required=True)
@@ -40,7 +58,34 @@ def _parser() -> argparse.ArgumentParser:
     ingest.add_argument("--force-download", action="store_true")
     ingest.add_argument("--fail-on-errors", action="store_true")
 
-    subcommands.add_parser("stats", help="print current paper persistence counts")
+    subcommands.add_parser("stats", help="print current PostgreSQL paper counts")
+
+    index = subcommands.add_parser(
+        "search-index",
+        help="synchronize PostgreSQL papers into the Week 3 BM25 index",
+    )
+    index.add_argument("--batch-size", type=int)
+    index.add_argument("--updated-since", type=_iso_datetime)
+    index.add_argument("--processed-only", action="store_true")
+    index.add_argument("--refresh", action="store_true")
+    index.add_argument("--rebuild", action="store_true")
+    index.add_argument("--fail-on-errors", action="store_true")
+
+    subcommands.add_parser("search-stats", help="print OpenSearch index statistics")
+
+    search = subcommands.add_parser("search", help="run a BM25 query from the container")
+    search.add_argument("query")
+    search.add_argument("--category", action="append", default=[])
+    search.add_argument("--published-from", type=_iso_date)
+    search.add_argument("--published-to", type=_iso_date)
+    search.add_argument("--processed-only", action="store_true")
+    search.add_argument("--page", type=int, default=1)
+    search.add_argument("--page-size", type=int)
+    search.add_argument(
+        "--sort",
+        choices=["relevance", "published_desc", "published_asc"],
+        default="relevance",
+    )
     return parser
 
 
@@ -76,15 +121,70 @@ def _run_stats(settings: Settings) -> int:
     try:
         with database.session() as session:
             stats = PaperRepository(session).stats()
-        payload = {
-            "total": stats.total,
-            "processed": stats.processed,
-            "with_text": stats.with_text,
-        }
-        print(json.dumps(payload, indent=2))
+        print(
+            json.dumps(
+                {
+                    "total": stats.total,
+                    "processed": stats.processed,
+                    "with_text": stats.with_text,
+                },
+                indent=2,
+            )
+        )
         return 0
     finally:
         database.close()
+
+
+def _run_search_index(args: argparse.Namespace, settings: Settings) -> int:
+    database = Database(settings.database)
+    client = OpenSearchClient(settings.opensearch)
+    try:
+        with database.session() as session:
+            report = SearchIndexingService(PaperRepository(session), client).run(
+                batch_size=args.batch_size or settings.opensearch.bulk_batch_size,
+                rebuild=args.rebuild,
+                refresh=args.refresh,
+                updated_since=args.updated_since,
+                processed_only=args.processed_only,
+            )
+        print(json.dumps(report.model_dump(mode="json"), indent=2))
+        return 1 if args.fail_on_errors and report.failed else 0
+    except SearchIndexSchemaError as exc:
+        print(json.dumps({"status": "failed", "error": str(exc)}))
+        return 2
+    finally:
+        client.close()
+        database.close()
+
+
+def _run_search_stats(settings: Settings) -> int:
+    client = OpenSearchClient(settings.opensearch)
+    try:
+        print(json.dumps(client.stats().model_dump(mode="json"), indent=2))
+        return 0
+    finally:
+        client.close()
+
+
+def _run_search(args: argparse.Namespace, settings: Settings) -> int:
+    client = OpenSearchClient(settings.opensearch)
+    try:
+        request = SearchRequest(
+            query=args.query,
+            categories=args.category,
+            published_from=args.published_from,
+            published_to=args.published_to,
+            processed_only=args.processed_only,
+            page=args.page,
+            page_size=args.page_size or settings.opensearch.default_page_size,
+            sort=args.sort,
+        )
+        response = client.search(request)
+        print(json.dumps(response.model_dump(mode="json"), indent=2, ensure_ascii=False))
+        return 0
+    finally:
+        client.close()
 
 
 def main() -> NoReturn:
@@ -93,11 +193,16 @@ def main() -> NoReturn:
     args = _parser().parse_args()
     settings = get_settings()
     configure_logging(settings)
-    code = (
-        asyncio.run(_run_ingest(args, settings))
-        if args.command == "ingest"
-        else _run_stats(settings)
-    )
+    if args.command == "ingest":
+        code = asyncio.run(_run_ingest(args, settings))
+    elif args.command == "stats":
+        code = _run_stats(settings)
+    elif args.command == "search-index":
+        code = _run_search_index(args, settings)
+    elif args.command == "search-stats":
+        code = _run_search_stats(settings)
+    else:
+        code = _run_search(args, settings)
     raise SystemExit(code)
 
 

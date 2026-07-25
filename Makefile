@@ -1,14 +1,14 @@
 SHELL := /bin/bash
 COMPOSE := docker compose
 RUN_API := $(COMPOSE) run --rm --no-deps api
-RUN_INGEST := $(COMPOSE) --profile core --profile ingestion run --rm ingestion
+RUN_INGEST := $(COMPOSE) --profile core --profile search --profile ingestion run --rm ingestion
 
 .DEFAULT_GOAL := help
 
-.PHONY: help verify-host bootstrap build build-ingestion build-airflow build-runtime up up-infra up-week1 up-week2 up-airflow up-search-ui wait-infra migrate migration search-init infra-init down reset ps logs airflow-logs shell ingestion-shell sync sync-ingestion lock format format-check lint typecheck test test-cov test-component test-external test-docling check health readiness container-info compose-config ingest ingest-metadata ingest-date stats airflow-dags airflow-errors
+.PHONY: help verify-host bootstrap build build-ingestion build-airflow build-runtime up up-infra up-week1 up-week2 up-week3 up-airflow up-search-ui wait-infra migrate migration search-init infra-init down reset ps logs airflow-logs shell ingestion-shell sync sync-ingestion lock format format-check lint typecheck test test-cov test-component test-external test-docling check health readiness container-info compose-config ingest ingest-metadata ingest-date stats search-index search-rebuild search-stats search-query airflow-dags airflow-errors
 
 help: ## Show available commands
-	@awk 'BEGIN {FS = ":.*## "; printf "\nPaperforge Week 2 commands:\n\n"} /^[a-zA-Z0-9_-]+:.*## / {printf "  %-22s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
+	@awk 'BEGIN {FS = ":.*## "; printf "\nPaperforge Week 3 commands:\n\n"} /^[a-zA-Z0-9_-]+:.*## / {printf "  %-22s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
 verify-host: ## Verify host tools; never installs Python
 	@bash scripts/verify-host.sh
@@ -26,10 +26,10 @@ build: ## Build the lightweight API development image
 	$(COMPOSE) build api
 
 build-ingestion: ## Build the Linux image with Docling system libraries
-	docker compose --profile core --profile ingestion build ingestion
+	$(COMPOSE) --profile core --profile search --profile ingestion build ingestion
 
 build-airflow: ## Build Airflow plus its isolated uv-managed Paperforge environment
-	$(COMPOSE) --profile core --profile ingestion build airflow
+	$(COMPOSE) --profile core --profile search --profile ingestion build airflow
 
 build-runtime: ## Build immutable API production image
 	@test -f uv.lock || (echo "uv.lock is missing; run make lock" && exit 1)
@@ -54,9 +54,13 @@ up-week2: ## Start Week 1 infrastructure, API, and prepare the ingestion environ
 	@$(MAKE) build-ingestion
 	@$(MAKE) sync-ingestion
 
+up-week3: ## Start Week 2 and synchronize PostgreSQL papers into BM25 search
+	@$(MAKE) up-week2
+	@$(MAKE) search-index
+
 up-airflow: ## Start local Airflow 3 standalone under the ingestion profile
 	@test -f .env || cp .env.example .env
-	$(COMPOSE) --profile core --profile ingestion up --build -d postgres airflow-db-init airflow
+	$(COMPOSE) --profile core --profile search --profile ingestion up --build -d postgres opensearch airflow-db-init airflow
 
 up-search-ui: ## Start OpenSearch and Dashboards
 	$(COMPOSE) --profile search --profile search-ui up -d opensearch opensearch-dashboards
@@ -91,7 +95,7 @@ logs: ## Follow API and Week 1 service logs
 	$(COMPOSE) logs --follow api postgres redis opensearch
 
 airflow-logs: ## Follow the local Airflow standalone logs
-	$(COMPOSE) --profile core --profile ingestion logs --follow airflow
+	$(COMPOSE) --profile core --profile search --profile ingestion logs --follow airflow
 
 shell: ## Open a one-off lightweight Linux shell
 	$(RUN_API) bash
@@ -150,7 +154,7 @@ readiness: ## Show dependency readiness from the host
 container-info: ## Verify Python and uv are running on Linux
 	$(RUN_API) bash scripts/verify-container.sh
 
-compose-config: ## Validate all Week 2 Compose profiles
+compose-config: ## Validate all Week 3 Compose profiles
 	$(COMPOSE) --profile core --profile search --profile search-ui --profile ingestion config --quiet
 
 ingest: ## Fetch and parse papers; override with MAX_RESULTS=3
@@ -166,8 +170,21 @@ ingest-date: ## Ingest one date; usage: make ingest-date DATE=2026-07-23 MAX_RES
 stats: ## Print PostgreSQL paper and processing counts
 	$(RUN_INGEST) uv run paperforge stats
 
-airflow-dags: ## List Airflow DAGs and verify the Week 2 DAG appears
-	$(COMPOSE) --profile core --profile ingestion exec airflow airflow dags list
+search-index: ## Upsert all PostgreSQL papers into the BM25 index
+	$(RUN_API) uv run paperforge search-index --refresh --fail-on-errors
+
+search-rebuild: ## Recreate only the derived search index and backfill it
+	$(RUN_API) uv run paperforge search-index --rebuild --refresh --fail-on-errors
+
+search-stats: ## Print OpenSearch BM25 index statistics
+	$(RUN_API) uv run paperforge search-stats
+
+search-query: ## Run BM25 search; usage: make search-query Q="AI agents"
+	@test -n "$(Q)" || (echo 'Usage: make search-query Q="query"' && exit 1)
+	$(RUN_API) uv run paperforge search "$(Q)"
+
+airflow-dags: ## List Airflow DAGs and verify the Week 3 DAG appears
+	$(COMPOSE) --profile core --profile search --profile ingestion exec airflow airflow dags list
 
 airflow-errors: ## List Airflow DAG import errors
-	$(COMPOSE) --profile core --profile ingestion exec airflow airflow dags list-import-errors
+	$(COMPOSE) --profile core --profile search --profile ingestion exec airflow airflow dags list-import-errors
