@@ -4,7 +4,14 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    SecretStr,
+    field_validator,
+    model_validator,
+)
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -88,7 +95,7 @@ class ArxivSettings(FrozenSettingsModel):
     rate_limit_seconds: float = Field(default=3.0, ge=3.0, le=60)
     max_retries: int = Field(default=3, ge=1, le=10)
     retry_backoff_seconds: float = Field(default=2.0, gt=0, le=60)
-    user_agent: str = "paperforge/0.4.0"
+    user_agent: str = "paperforge/0.5.0"
     pdf_cache_dir: Path = Path("/workspace/data/arxiv_pdfs")
     max_pdf_download_mb: int = Field(default=25, ge=1, le=200)
 
@@ -109,6 +116,89 @@ class IngestionSettings(FrozenSettingsModel):
     max_concurrent_downloads: int = Field(default=2, ge=1, le=10)
     max_concurrent_parses: int = Field(default=1, ge=1, le=4)
     pdf_retention_days: int = Field(default=30, ge=1, le=365)
+
+
+class ChunkingSettings(FrozenSettingsModel):
+    """Deterministic section-aware chunking limits."""
+
+    chunk_size_words: int = Field(default=600, ge=2, le=2000)
+    overlap_words: int = Field(default=100, ge=0, le=500)
+    min_chunk_words: int = Field(default=80, ge=1, le=500)
+    excluded_section_titles: list[str] = Field(
+        default_factory=lambda: [
+            "references",
+            "bibliography",
+            "acknowledgements",
+            "acknowledgments",
+        ]
+    )
+
+    @model_validator(mode="after")
+    def validate_windows(self) -> Self:
+        """Ensure overlap advances and the minimum fits in a target chunk."""
+
+        if self.overlap_words >= self.chunk_size_words:
+            raise ValueError("overlap_words must be smaller than chunk_size_words")
+        if self.min_chunk_words > self.chunk_size_words:
+            raise ValueError("min_chunk_words cannot exceed chunk_size_words")
+        return self
+
+
+class EmbeddingSettings(FrozenSettingsModel):
+    """Jina retrieval-embedding configuration."""
+
+    enabled: bool = True
+    required: bool = False
+    api_key: SecretStr | None = None
+    base_url: str = "https://api.jina.ai/v1/embeddings"
+    model: str = "jina-embeddings-v5-text-small"
+    dimensions: int = Field(default=1024, ge=1, le=4096)
+    timeout_seconds: float = Field(default=30.0, gt=0, le=180)
+    batch_size: int = Field(default=32, ge=1, le=100)
+    max_retries: int = Field(default=3, ge=1, le=10)
+    retry_backoff_seconds: float = Field(default=1.0, gt=0, le=60)
+    max_input_characters: int = Field(default=24000, ge=1000, le=100000)
+
+    @field_validator("api_key", mode="before")
+    @classmethod
+    def blank_api_key_is_none(cls, value: object) -> object:
+        """Treat an empty environment variable as an unconfigured API key."""
+
+        if isinstance(value, str) and not value.strip():
+            return None
+        return value
+
+
+class HybridSearchSettings(FrozenSettingsModel):
+    """Chunk-index, vector-search, and RRF tuning settings."""
+
+    enabled: bool = True
+    index_name: str = "paperforge-chunks-hybrid-v1"
+    schema_version: int = Field(default=1, ge=1)
+    search_pipeline: str = "paperforge-hybrid-rrf-v1"
+    embedding_field: str = "embedding"
+    default_page_size: int = Field(default=10, ge=1, le=100)
+    max_page_size: int = Field(default=50, ge=1, le=200)
+    max_result_window: int = Field(default=10000, ge=100, le=100000)
+    highlight_fragment_size: int = Field(default=220, ge=50, le=500)
+    bulk_batch_size: int = Field(default=25, ge=1, le=500)
+    candidate_multiplier: int = Field(default=4, ge=1, le=20)
+    max_candidate_count: int = Field(default=200, ge=10, le=10000)
+    rrf_rank_constant: int = Field(default=60, ge=1, le=1000)
+    bm25_weight: float = Field(default=0.5, ge=0, le=1)
+    vector_weight: float = Field(default=0.5, ge=0, le=1)
+    hnsw_m: int = Field(default=16, ge=2, le=100)
+    hnsw_ef_construction: int = Field(default=100, ge=8, le=1000)
+
+    @model_validator(mode="after")
+    def validate_hybrid_limits(self) -> Self:
+        """Validate public limits and RRF weights."""
+
+        if self.default_page_size > self.max_page_size:
+            raise ValueError("default_page_size cannot exceed max_page_size")
+        if abs((self.bm25_weight + self.vector_weight) - 1.0) > 1e-9:
+            raise ValueError("bm25_weight and vector_weight must sum to 1.0")
+        return self
 
 
 class Settings(BaseSettings):
@@ -138,6 +228,9 @@ class Settings(BaseSettings):
     arxiv: ArxivSettings = Field(default_factory=ArxivSettings)
     document_parser: DocumentParserSettings = Field(default_factory=DocumentParserSettings)
     ingestion: IngestionSettings = Field(default_factory=IngestionSettings)
+    chunking: ChunkingSettings = Field(default_factory=ChunkingSettings)
+    embeddings: EmbeddingSettings = Field(default_factory=EmbeddingSettings)
+    hybrid_search: HybridSearchSettings = Field(default_factory=HybridSearchSettings)
 
 
 @lru_cache
