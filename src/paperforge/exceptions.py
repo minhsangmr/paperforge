@@ -59,3 +59,19 @@ class EmbeddingUnavailableError(EmbeddingError):
 
 class EmbeddingResponseError(EmbeddingError):
     """The embedding provider returned an unusable response."""
+
+
+class OllamaError(PaperforgeError):
+    """Base error for Ollama connectivity and generation."""
+
+
+class OllamaConnectionError(OllamaError):
+    """The Ollama service could not be reached."""
+
+
+class OllamaTimeoutError(OllamaError):
+    """An Ollama request exceeded its configured timeout."""
+
+
+class OllamaGenerationError(OllamaError):
+    """Ollama returned an HTTP or response-format failure."""

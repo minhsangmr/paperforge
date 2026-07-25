@@ -42,7 +42,7 @@ def test_liveness_echoes_request_id() -> None:
 
     assert response.status_code == 200
     assert response.headers["X-Request-ID"] == "test-request"
-    assert response.json()["version"] == "0.5.0"
+    assert response.json()["version"] == "0.6.0"
 
 
 def test_readiness_returns_200_for_optional_failure() -> None:

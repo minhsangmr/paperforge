@@ -77,12 +77,49 @@ class RedisSettings(FrozenSettingsModel):
 
 
 class OllamaSettings(FrozenSettingsModel):
-    """Ollama health adapter settings; generation is added in Week 5."""
+    """Ollama health, generation, and local-model settings."""
 
     enabled: bool = False
     required: bool = False
     url: str = "http://ollama:11434"
-    timeout_seconds: float = Field(default=3.0, gt=0, le=60)
+    health_timeout_seconds: float = Field(default=3.0, gt=0, le=60)
+    request_timeout_seconds: float = Field(default=120.0, gt=0, le=600)
+    default_model: str = "llama3.2:1b"
+    temperature: float = Field(default=0.2, ge=0, le=2)
+    top_p: float = Field(default=0.9, gt=0, le=1)
+    max_output_tokens: int = Field(default=512, ge=32, le=8192)
+    keep_alive: str = "10m"
+
+
+class RAGSettings(FrozenSettingsModel):
+    """Grounded prompt and retrieval limits for Week 5."""
+
+    default_top_k: int = Field(default=3, ge=1, le=10)
+    max_top_k: int = Field(default=10, ge=1, le=20)
+    default_model: str = "llama3.2:1b"
+    max_context_characters: int = Field(default=24000, ge=1000, le=200000)
+    max_answer_words: int = Field(default=300, ge=50, le=2000)
+    no_context_answer: str = (
+        "I could not find enough relevant information in the indexed papers "
+        "to answer that question."
+    )
+
+    @model_validator(mode="after")
+    def validate_top_k(self) -> Self:
+        """Keep the default retrieval count within the public limit."""
+
+        if self.default_top_k > self.max_top_k:
+            raise ValueError("default_top_k cannot exceed max_top_k")
+        return self
+
+
+class UISettings(FrozenSettingsModel):
+    """Containerized Gradio client settings."""
+
+    enabled: bool = True
+    api_base_url: str = "http://api:8000/api/v1"
+    host: str = "0.0.0.0"
+    port: int = Field(default=7861, ge=1, le=65535)
 
 
 class ArxivSettings(FrozenSettingsModel):
@@ -95,7 +132,7 @@ class ArxivSettings(FrozenSettingsModel):
     rate_limit_seconds: float = Field(default=3.0, ge=3.0, le=60)
     max_retries: int = Field(default=3, ge=1, le=10)
     retry_backoff_seconds: float = Field(default=2.0, gt=0, le=60)
-    user_agent: str = "paperforge/0.5.0"
+    user_agent: str = "paperforge/0.6.0"
     pdf_cache_dir: Path = Path("/workspace/data/arxiv_pdfs")
     max_pdf_download_mb: int = Field(default=25, ge=1, le=200)
 
@@ -225,6 +262,8 @@ class Settings(BaseSettings):
     opensearch: OpenSearchSettings = Field(default_factory=OpenSearchSettings)
     redis: RedisSettings = Field(default_factory=RedisSettings)
     ollama: OllamaSettings = Field(default_factory=OllamaSettings)
+    rag: RAGSettings = Field(default_factory=RAGSettings)
+    ui: UISettings = Field(default_factory=UISettings)
     arxiv: ArxivSettings = Field(default_factory=ArxivSettings)
     document_parser: DocumentParserSettings = Field(default_factory=DocumentParserSettings)
     ingestion: IngestionSettings = Field(default_factory=IngestionSettings)
