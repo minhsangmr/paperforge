@@ -1,4 +1,4 @@
-"""Daily Week 2 ingestion DAG; OpenSearch indexing intentionally starts in Week 3."""
+"""Daily Week 3 ingestion and BM25 indexing DAG."""
 
 import os
 import subprocess
@@ -43,14 +43,30 @@ def ingest_previous_interval(day: str) -> None:
 
 
 @task
-def report_database_stats() -> None:
-    """Emit persistence counts into the task log."""
+def index_search_documents(updated_since: str) -> None:
+    """Synchronize newly created or updated PostgreSQL papers into OpenSearch."""
 
     subprocess.run(
-        [_PAPERFORGE_CLI, "stats"],
+        [
+            _PAPERFORGE_CLI,
+            "search-index",
+            "--updated-since",
+            updated_since,
+            "--refresh",
+            "--fail-on-errors",
+        ],
         check=True,
         env=_paperforge_environment(),
     )
+
+
+@task
+def report_pipeline_stats() -> None:
+    """Emit PostgreSQL and OpenSearch counts into the task log."""
+
+    environment = _paperforge_environment()
+    subprocess.run([_PAPERFORGE_CLI, "stats"], check=True, env=environment)
+    subprocess.run([_PAPERFORGE_CLI, "search-stats"], check=True, env=environment)
 
 
 @task
@@ -71,7 +87,7 @@ def cleanup_old_pdf_cache() -> int:
 
 with DAG(
     dag_id="paperforge_arxiv_ingestion",
-    description="Fetch arXiv metadata, parse PDFs with Docling, and upsert PostgreSQL",
+    description="Fetch arXiv papers, parse PDFs, persist PostgreSQL, and index BM25 search",
     start_date=datetime(2026, 7, 24, tzinfo=UTC),
     schedule="0 6 * * 1-5",
     catchup=False,
@@ -81,10 +97,11 @@ with DAG(
         "retries": 2,
         "retry_delay": timedelta(minutes=30),
     },
-    tags=["paperforge", "arxiv", "docling", "week2"],
+    tags=["paperforge", "arxiv", "docling", "opensearch", "bm25", "week3"],
 ) as dag:
     ingest = ingest_previous_interval("{{ ds_nodash }}")
-    report = report_database_stats()
+    index = index_search_documents("{{ data_interval_start.isoformat() }}")
+    report = report_pipeline_stats()
     cleanup = cleanup_old_pdf_cache()
 
-    ingest >> report >> cleanup
+    ingest >> index >> report >> cleanup

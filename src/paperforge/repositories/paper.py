@@ -1,8 +1,10 @@
 """Transactional repository for academic papers."""
 
+from collections.abc import Iterator
 from dataclasses import dataclass
+from datetime import datetime
 
-from sqlalchemy import func, select
+from sqlalchemy import Select, func, select
 from sqlalchemy.orm import Session
 
 from paperforge.models.paper import Paper
@@ -27,7 +29,7 @@ class PaperStats:
 
 
 class PaperRepository:
-    """Persist papers without owning transaction commit boundaries."""
+    """Persist and stream papers without owning transaction boundaries."""
 
     def __init__(self, session: Session) -> None:
         self._session = session
@@ -79,6 +81,24 @@ class PaperRepository:
                 paper.parser_metadata = payload.parser_metadata
         self._session.flush()
         return UpsertOutcome(paper=paper, created=created)
+
+    def iter_for_search_index(
+        self,
+        *,
+        batch_size: int,
+        updated_since: datetime | None = None,
+        processed_only: bool = False,
+    ) -> Iterator[list[Paper]]:
+        """Stream deterministic batches for OpenSearch synchronization."""
+
+        statement: Select[tuple[Paper]] = select(Paper).order_by(Paper.updated_at, Paper.id)
+        if updated_since is not None:
+            statement = statement.where(Paper.updated_at >= updated_since)
+        if processed_only:
+            statement = statement.where(Paper.pdf_processed.is_(True))
+        result = self._session.scalars(statement)
+        for partition in result.partitions(batch_size):
+            yield list(partition)
 
     def stats(self) -> PaperStats:
         """Return counts used by CLI and Airflow reporting."""

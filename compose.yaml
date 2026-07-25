@@ -186,6 +186,8 @@ services:
     depends_on:
       airflow-db-init:
         condition: service_completed_successfully
+      opensearch:
+        condition: service_healthy
     volumes:
       - ./airflow/dags:/opt/airflow/dags:ro
       - paperforge_airflow_logs:/opt/airflow/logs
