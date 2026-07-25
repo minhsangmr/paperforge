@@ -9,6 +9,7 @@ from paperforge.infrastructure.ollama import OllamaClient
 from paperforge.infrastructure.opensearch import OpenSearchClient
 from paperforge.infrastructure.redis import RedisClient
 from paperforge.services.embeddings.jina import JinaEmbeddingsClient
+from paperforge.services.observability.langfuse import LangfuseObservability
 
 
 @dataclass(slots=True)
@@ -21,10 +22,13 @@ class Infrastructure:
     ollama: OllamaClient | None
     hybrid_search: HybridSearchClient | None = None
     embeddings: JinaEmbeddingsClient | None = None
+    observability: LangfuseObservability | None = None
 
     async def close(self) -> None:
         """Release resources in reverse dependency order."""
 
+        if self.observability is not None:
+            await self.observability.close()
         if self.embeddings is not None:
             await self.embeddings.close()
         if self.hybrid_search is not None:
@@ -54,4 +58,5 @@ def build_infrastructure(settings: Settings) -> Infrastructure:
         embeddings=(
             JinaEmbeddingsClient(settings.embeddings) if settings.embeddings.enabled else None
         ),
+        observability=LangfuseObservability(settings.langfuse),
     )
