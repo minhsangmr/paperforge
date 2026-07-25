@@ -197,6 +197,61 @@ services:
       - "8080:8080"
     command: ["airflow", "standalone"]
 
+  ollama:
+    image: ollama/ollama:0.11.2
+    profiles: ["llm"]
+    init: true
+    ports:
+      - "11434:11434"
+    volumes:
+      - paperforge_ollama:/root/.ollama
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+
+  ollama-model-init:
+    image: ollama/ollama:0.11.2
+    profiles: ["llm"]
+    env_file:
+      - .env
+    environment:
+      OLLAMA_HOST: http://ollama:11434
+    depends_on:
+      ollama:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - |
+        ollama pull "$${PAPERFORGE_OLLAMA__DEFAULT_MODEL:-llama3.2:1b}"
+
+  gradio:
+    <<: *app-base
+    profiles: ["app-ui"]
+    environment:
+      PAPERFORGE_UI__API_BASE_URL: http://api:8000/api/v1
+      PAPERFORGE_UI__HOST: 0.0.0.0
+      PAPERFORGE_UI__PORT: 7861
+    volumes:
+      - .:/workspace
+      - paperforge_ui_venv:/workspace/.venv
+      - paperforge_uv_cache:/root/.cache/uv
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - "7861:7861"
+    command:
+      - uv
+      - run
+      - --extra
+      - ui
+      - python
+      - -m
+      - paperforge.gradio_app
+
 volumes:
   paperforge_venv:
   paperforge_ingestion_venv:
@@ -207,3 +262,5 @@ volumes:
   paperforge_redis:
   paperforge_opensearch:
   paperforge_airflow_logs:
+  paperforge_ollama:
+  paperforge_ui_venv:

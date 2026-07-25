@@ -2,13 +2,14 @@ SHELL := /bin/bash
 COMPOSE := docker compose
 RUN_API := $(COMPOSE) run --rm --no-deps api
 RUN_INGEST := $(COMPOSE) --profile core --profile search --profile ingestion run --rm ingestion
+RUN_UI := $(COMPOSE) --profile app-ui run --rm --no-deps gradio
 
 .DEFAULT_GOAL := help
 
-.PHONY: help verify-host bootstrap build build-ingestion build-airflow build-runtime up up-infra up-week1 up-week2 up-week3 up-week4 up-airflow up-search-ui wait-infra migrate migration search-init infra-init down reset ps logs airflow-logs shell ingestion-shell sync sync-ingestion lock format format-check lint typecheck test test-cov test-component test-external test-docling check health readiness container-info compose-config ingest ingest-metadata ingest-date stats search-index search-rebuild search-stats search-query hybrid-index hybrid-index-text hybrid-rebuild hybrid-stats hybrid-query airflow-dags airflow-errors
+.PHONY: help verify-host bootstrap build build-ingestion build-airflow build-runtime up up-infra up-week1 up-week2 up-week3 up-week4 up-week5 up-llm up-ui up-airflow up-search-ui wait-infra migrate migration search-init infra-init down reset ps logs airflow-logs shell ingestion-shell sync sync-ingestion sync-ui lock format format-check lint typecheck test test-cov test-component test-external test-docling check health readiness container-info compose-config ingest ingest-metadata ingest-date stats search-index search-rebuild search-stats search-query hybrid-index hybrid-index-text hybrid-rebuild hybrid-stats hybrid-query ollama-pull ollama-models rag-ask rag-stream airflow-dags airflow-errors
 
 help: ## Show available commands
-	@awk 'BEGIN {FS = ":.*## "; printf "\nPaperforge Week 4 commands:\n\n"} /^[a-zA-Z0-9_-]+:.*## / {printf "  %-22s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
+	@awk 'BEGIN {FS = ":.*## "; printf "\nPaperforge Week 5 commands:\n\n"} /^[a-zA-Z0-9_-]+:.*## / {printf "  %-22s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
 verify-host: ## Verify host tools; never installs Python
 	@bash scripts/verify-host.sh
@@ -62,6 +63,26 @@ up-week4: ## Start Week 3 and build the chunk-level hybrid index
 	@$(MAKE) up-week3
 	@$(MAKE) hybrid-index
 
+up-llm: ## Start the local CPU Ollama service
+	@test -f .env || cp .env.example .env
+	$(COMPOSE) --profile llm up -d ollama
+
+ollama-pull: ## Pull the configured local model into the persistent Ollama volume
+	$(COMPOSE) --profile llm run --rm ollama-model-init
+
+ollama-models: ## List models installed inside the Ollama Linux container
+	$(COMPOSE) --profile llm exec ollama ollama list
+
+up-ui: ## Start the containerized Gradio interface on port 7861
+	$(COMPOSE) --profile app-ui up --build -d gradio
+
+up-week5: ## Start retrieval, Ollama, API, and the Gradio application
+	@$(MAKE) up-week4
+	@$(MAKE) up-llm
+	@$(MAKE) ollama-pull
+	$(COMPOSE) up --build -d api
+	@$(MAKE) up-ui
+
 up-airflow: ## Start local Airflow 3 standalone under the ingestion profile
 	@test -f .env || cp .env.example .env
 	$(COMPOSE) --profile core --profile search --profile ingestion up --build -d postgres opensearch airflow-db-init airflow
@@ -87,13 +108,13 @@ infra-init: ## Apply database migrations and search bootstrap
 	@$(MAKE) search-init
 
 down: ## Stop all known services without deleting data
-	$(COMPOSE) --profile core --profile search --profile search-ui --profile ingestion down
+	$(COMPOSE) --profile core --profile search --profile search-ui --profile ingestion --profile llm --profile app-ui down
 
 reset: ## Stop containers and delete every Paperforge volume
-	$(COMPOSE) --profile core --profile search --profile search-ui --profile ingestion down --volumes --remove-orphans
+	$(COMPOSE) --profile core --profile search --profile search-ui --profile ingestion --profile llm --profile app-ui down --volumes --remove-orphans
 
 ps: ## Show all service states
-	$(COMPOSE) --profile core --profile search --profile search-ui --profile ingestion ps
+	$(COMPOSE) --profile core --profile search --profile search-ui --profile ingestion --profile llm --profile app-ui ps
 
 logs: ## Follow API and Week 1 service logs
 	$(COMPOSE) logs --follow api postgres redis opensearch
@@ -110,6 +131,10 @@ ingestion-shell: ## Open a Linux shell with the ingestion venv mounted
 sync: ## Sync lightweight dependencies from committed uv.lock
 	@test -f uv.lock || (echo "uv.lock is missing; run make lock" && exit 1)
 	$(RUN_API) uv sync --frozen
+
+sync-ui: ## Sync Gradio in its isolated Linux venv
+	@test -f uv.lock || (echo "uv.lock is missing; run make lock" && exit 1)
+	$(RUN_UI) uv sync --frozen --extra ui
 
 sync-ingestion: ## Sync Docling and CPU-only PyTorch in the isolated ingestion venv
 	@test -f uv.lock || (echo "uv.lock is missing; run make lock" && exit 1)
@@ -158,8 +183,8 @@ readiness: ## Show dependency readiness from the host
 container-info: ## Verify Python and uv are running on Linux
 	$(RUN_API) bash scripts/verify-container.sh
 
-compose-config: ## Validate all Week 4 Compose profiles
-	$(COMPOSE) --profile core --profile search --profile search-ui --profile ingestion config --quiet
+compose-config: ## Validate all Week 5 Compose profiles
+	$(COMPOSE) --profile core --profile search --profile search-ui --profile ingestion --profile llm --profile app-ui config --quiet
 
 ingest: ## Fetch and parse papers; override with MAX_RESULTS=3
 	$(RUN_INGEST) uv run paperforge ingest --max-results $(or $(MAX_RESULTS),3)
@@ -202,6 +227,21 @@ hybrid-stats: ## Print chunk, vector, and unique-paper index statistics
 hybrid-query: ## Unified search; usage: make hybrid-query Q="semantic retrieval" MODE=auto
 	@test -n "$(Q)" || (echo 'Usage: make hybrid-query Q="query" [MODE=auto|bm25|vector|hybrid]' && exit 1)
 	$(RUN_API) uv run paperforge hybrid-search "$(Q)" --mode $(or $(MODE),auto)
+
+rag-ask: ## Ask the complete RAG API; usage: make rag-ask Q="What is RAG?"
+	@test -n "$(Q)" || (echo 'Usage: make rag-ask Q="question"' && exit 1)
+	$(COMPOSE) exec -T api curl --fail --silent --show-error \
+		-X POST http://localhost:8000/api/v1/ask \
+		-H 'Content-Type: application/json' \
+		-d '{"query":"$(Q)","top_k":$(or $(TOP_K),3),"use_hybrid":$(or $(HYBRID),true)}'
+	@echo
+
+rag-stream: ## Stream the RAG API as SSE; usage: make rag-stream Q="Explain attention"
+	@test -n "$(Q)" || (echo 'Usage: make rag-stream Q="question"' && exit 1)
+	$(COMPOSE) exec -T api curl --no-buffer --fail --silent --show-error \
+		-X POST http://localhost:8000/api/v1/stream \
+		-H 'Content-Type: application/json' \
+		-d '{"query":"$(Q)","top_k":$(or $(TOP_K),3),"use_hybrid":$(or $(HYBRID),true)}'
 
 airflow-dags: ## List Airflow DAGs and verify the Week 4 DAG appears
 	$(COMPOSE) --profile core --profile search --profile ingestion exec airflow airflow dags list
