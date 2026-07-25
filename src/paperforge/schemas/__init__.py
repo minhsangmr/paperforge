@@ -20,6 +20,13 @@ from paperforge.schemas.papers import (
     PaperUpsert,
     ParsedDocument,
 )
+from paperforge.schemas.rag import (
+    OllamaUsage,
+    RAGRequest,
+    RAGResponse,
+    RAGSource,
+    RAGStreamEvent,
+)
 from paperforge.schemas.search import (
     BulkIndexResult,
     PaperSearchDocument,
@@ -44,9 +51,14 @@ __all__ = [
     "HybridSearchResponse",
     "IngestionIssue",
     "IngestionReport",
+    "OllamaUsage",
     "PaperSearchDocument",
     "PaperUpsert",
     "ParsedDocument",
+    "RAGRequest",
+    "RAGResponse",
+    "RAGSource",
+    "RAGStreamEvent",
     "ResolvedSearchMode",
     "SearchHit",
     "SearchIndexReport",

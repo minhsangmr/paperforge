@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "paperforge"
-version = "0.5.0"
+version = "0.6.0"
 description = "A container-first agentic RAG system for academic papers."
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
@@ -24,6 +24,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+ui = [
+  "gradio>=5.35,<6",
+]
 ingestion = [
   "docling>=2.96,<3",
   "torch==2.13.0",
@@ -62,6 +65,7 @@ source = ["paperforge"]
 omit = [
   "src/paperforge/cli.py",
   "src/paperforge/infrastructure/bootstrap.py",
+  "src/paperforge/gradio_app.py",
 ]
 
 [tool.coverage.report]
@@ -96,7 +100,7 @@ init_typed = true
 warn_required_dynamic_aliases = true
 
 [[tool.mypy.overrides]]
-module = ["docling.*", "opensearchpy.*", "redis.*"]
+module = ["docling.*", "gradio.*", "opensearchpy.*", "redis.*"]
 ignore_missing_imports = true
 
 [tool.uv.sources]
