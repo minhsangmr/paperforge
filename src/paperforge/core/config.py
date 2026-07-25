@@ -34,13 +34,28 @@ class DatabaseSettings(FrozenSettingsModel):
 
 
 class OpenSearchSettings(FrozenSettingsModel):
-    """OpenSearch connectivity and bootstrap settings."""
+    """OpenSearch connectivity, BM25 schema, and query limits."""
 
     enabled: bool = True
     required: bool = True
     url: str = "http://opensearch:9200"
-    index_name: str = "paperforge-papers-v1"
+    index_name: str = "paperforge-papers-bm25-v1"
+    schema_version: int = Field(default=1, ge=1)
     timeout_seconds: float = Field(default=5.0, gt=0, le=60)
+    default_page_size: int = Field(default=10, ge=1, le=100)
+    max_page_size: int = Field(default=50, ge=1, le=200)
+    max_result_window: int = Field(default=10000, ge=100, le=100000)
+    highlight_fragment_size: int = Field(default=180, ge=50, le=500)
+    fuzzy_min_length: int = Field(default=5, ge=3, le=20)
+    bulk_batch_size: int = Field(default=100, ge=1, le=1000)
+
+    @model_validator(mode="after")
+    def validate_search_limits(self) -> Self:
+        """Ensure defaults never exceed public query limits."""
+
+        if self.default_page_size > self.max_page_size:
+            raise ValueError("default_page_size cannot exceed max_page_size")
+        return self
 
 
 class RedisSettings(FrozenSettingsModel):
@@ -73,7 +88,7 @@ class ArxivSettings(FrozenSettingsModel):
     rate_limit_seconds: float = Field(default=3.0, ge=3.0, le=60)
     max_retries: int = Field(default=3, ge=1, le=10)
     retry_backoff_seconds: float = Field(default=2.0, gt=0, le=60)
-    user_agent: str = "paperforge/0.3.0"
+    user_agent: str = "paperforge/0.4.0"
     pdf_cache_dir: Path = Path("/workspace/data/arxiv_pdfs")
     max_pdf_download_mb: int = Field(default=25, ge=1, le=200)
 
