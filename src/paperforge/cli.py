@@ -10,11 +10,17 @@ from paperforge.core.config import Settings, get_settings
 from paperforge.core.logging import configure_logging
 from paperforge.exceptions import IngestionPipelineError, SearchIndexSchemaError
 from paperforge.infrastructure.database import Database
+from paperforge.infrastructure.hybrid_search import HybridSearchClient
 from paperforge.infrastructure.opensearch import OpenSearchClient
 from paperforge.repositories.paper import PaperRepository
+from paperforge.schemas.hybrid_search import HybridSearchRequest
 from paperforge.schemas.search import SearchRequest
 from paperforge.services.arxiv.client import ArxivClient
+from paperforge.services.chunking import SectionAwareChunker
 from paperforge.services.documents.docling_parser import DoclingDocumentParser
+from paperforge.services.embeddings.jina import JinaEmbeddingsClient
+from paperforge.services.hybrid_indexing import HybridIndexingService
+from paperforge.services.hybrid_search import HybridSearchService
 from paperforge.services.ingestion import IngestionService
 from paperforge.services.search_indexing import SearchIndexingService
 
@@ -86,6 +92,37 @@ def _parser() -> argparse.ArgumentParser:
         choices=["relevance", "published_desc", "published_asc"],
         default="relevance",
     )
+
+    hybrid_index = subcommands.add_parser(
+        "hybrid-index",
+        help="chunk processed papers and synchronize the Week 4 vector index",
+    )
+    hybrid_index.add_argument("--batch-size", type=int)
+    hybrid_index.add_argument("--updated-since", type=_iso_datetime)
+    hybrid_index.add_argument("--refresh", action="store_true")
+    hybrid_index.add_argument("--rebuild", action="store_true")
+    hybrid_index.add_argument(
+        "--text-only",
+        action="store_true",
+        help="index chunks without calling the embedding provider",
+    )
+    hybrid_index.add_argument("--fail-on-errors", action="store_true")
+
+    subcommands.add_parser("hybrid-stats", help="print Week 4 hybrid-index statistics")
+
+    hybrid_search = subcommands.add_parser(
+        "hybrid-search",
+        help="run BM25, vector, or RRF hybrid search from the container",
+    )
+    hybrid_search.add_argument("query")
+    hybrid_search.add_argument(
+        "--mode", choices=["auto", "bm25", "vector", "hybrid"], default="auto"
+    )
+    hybrid_search.add_argument("--category", action="append", default=[])
+    hybrid_search.add_argument("--published-from", type=_iso_date)
+    hybrid_search.add_argument("--published-to", type=_iso_date)
+    hybrid_search.add_argument("--page", type=int, default=1)
+    hybrid_search.add_argument("--page-size", type=int)
     return parser
 
 
@@ -187,6 +224,64 @@ def _run_search(args: argparse.Namespace, settings: Settings) -> int:
         client.close()
 
 
+async def _run_hybrid_index(args: argparse.Namespace, settings: Settings) -> int:
+    database = Database(settings.database)
+    client = HybridSearchClient(settings.opensearch, settings.hybrid_search, settings.embeddings)
+    embeddings = JinaEmbeddingsClient(settings.embeddings)
+    try:
+        with database.session() as session:
+            report = await HybridIndexingService(
+                PaperRepository(session),
+                SectionAwareChunker(settings.chunking),
+                embeddings,
+                client,
+            ).run(
+                batch_size=args.batch_size or settings.hybrid_search.bulk_batch_size,
+                rebuild=args.rebuild,
+                refresh=args.refresh,
+                updated_since=args.updated_since,
+                embed=not args.text_only,
+            )
+        print(json.dumps(report.model_dump(mode="json"), indent=2))
+        return 1 if args.fail_on_errors and report.failed else 0
+    finally:
+        await embeddings.close()
+        client.close()
+        database.close()
+
+
+def _run_hybrid_stats(settings: Settings) -> int:
+    client = HybridSearchClient(settings.opensearch, settings.hybrid_search, settings.embeddings)
+    try:
+        print(json.dumps(client.stats().model_dump(mode="json"), indent=2))
+        return 0
+    finally:
+        client.close()
+
+
+async def _run_hybrid_search(args: argparse.Namespace, settings: Settings) -> int:
+    client = HybridSearchClient(settings.opensearch, settings.hybrid_search, settings.embeddings)
+    embeddings = JinaEmbeddingsClient(settings.embeddings)
+    try:
+        request = HybridSearchRequest(
+            query=args.query,
+            mode=args.mode,
+            categories=args.category,
+            published_from=args.published_from,
+            published_to=args.published_to,
+            page=args.page,
+            page_size=args.page_size or settings.hybrid_search.default_page_size,
+        )
+        response = await HybridSearchService(client, embeddings, settings.hybrid_search).search(
+            request
+        )
+        print(json.dumps(response.model_dump(mode="json"), indent=2, ensure_ascii=False))
+        return 0
+    finally:
+        await embeddings.close()
+        client.close()
+
+
 def main() -> NoReturn:
     """Parse CLI arguments and exit with a task-friendly status code."""
 
@@ -201,6 +296,12 @@ def main() -> NoReturn:
         code = _run_search_index(args, settings)
     elif args.command == "search-stats":
         code = _run_search_stats(settings)
+    elif args.command == "hybrid-index":
+        code = asyncio.run(_run_hybrid_index(args, settings))
+    elif args.command == "hybrid-stats":
+        code = _run_hybrid_stats(settings)
+    elif args.command == "hybrid-search":
+        code = asyncio.run(_run_hybrid_search(args, settings))
     else:
         code = _run_search(args, settings)
     raise SystemExit(code)
