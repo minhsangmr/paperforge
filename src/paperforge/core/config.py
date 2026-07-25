@@ -76,6 +76,56 @@ class RedisSettings(FrozenSettingsModel):
     default_ttl_seconds: int = Field(default=21600, ge=1)
 
 
+class RAGCacheSettings(FrozenSettingsModel):
+    """Exact-match response cache behavior."""
+
+    enabled: bool = True
+    namespace: str = "paperforge:rag-cache:v1"
+    ttl_seconds: int = Field(default=86400, ge=60, le=604800)
+    response_schema_version: int = Field(default=1, ge=1)
+    stream_chunk_characters: int = Field(default=96, ge=16, le=1000)
+    cache_empty_answers: bool = False
+
+    @field_validator("namespace")
+    @classmethod
+    def validate_namespace(cls, value: str) -> str:
+        normalized = value.strip().strip(":")
+        if not normalized:
+            raise ValueError("cache namespace cannot be blank")
+        return normalized
+
+
+class LangfuseSettings(FrozenSettingsModel):
+    """Optional Langfuse tracing and feedback configuration."""
+
+    enabled: bool = False
+    required: bool = False
+    base_url: str = "http://langfuse-web:3000"
+    public_key: SecretStr | None = None
+    secret_key: SecretStr | None = None
+    timeout_seconds: int = Field(default=5, ge=1, le=60)
+    flush_at: int = Field(default=64, ge=1, le=1000)
+    flush_interval_seconds: float = Field(default=5.0, gt=0, le=60)
+    sample_rate: float = Field(default=1.0, ge=0, le=1)
+    tracing_environment: str = "development"
+    release: str = "0.7.0"
+    capture_content: bool = False
+    score_name: str = "user-feedback"
+
+    @field_validator("public_key", "secret_key", mode="before")
+    @classmethod
+    def blank_secret_is_none(cls, value: object) -> object:
+        if isinstance(value, str) and not value.strip():
+            return None
+        return value
+
+    @property
+    def configured(self) -> bool:
+        """Return true only when both SDK credentials are present."""
+
+        return self.public_key is not None and self.secret_key is not None
+
+
 class OllamaSettings(FrozenSettingsModel):
     """Ollama health, generation, and local-model settings."""
 
@@ -92,7 +142,7 @@ class OllamaSettings(FrozenSettingsModel):
 
 
 class RAGSettings(FrozenSettingsModel):
-    """Grounded prompt and retrieval limits for Week 5."""
+    """Grounded prompt and retrieval limits."""
 
     default_top_k: int = Field(default=3, ge=1, le=10)
     max_top_k: int = Field(default=10, ge=1, le=20)
@@ -132,7 +182,7 @@ class ArxivSettings(FrozenSettingsModel):
     rate_limit_seconds: float = Field(default=3.0, ge=3.0, le=60)
     max_retries: int = Field(default=3, ge=1, le=10)
     retry_backoff_seconds: float = Field(default=2.0, gt=0, le=60)
-    user_agent: str = "paperforge/0.6.0"
+    user_agent: str = "paperforge/0.7.0"
     pdf_cache_dir: Path = Path("/workspace/data/arxiv_pdfs")
     max_pdf_download_mb: int = Field(default=25, ge=1, le=200)
 
@@ -261,6 +311,8 @@ class Settings(BaseSettings):
     database: DatabaseSettings = Field(default_factory=DatabaseSettings)
     opensearch: OpenSearchSettings = Field(default_factory=OpenSearchSettings)
     redis: RedisSettings = Field(default_factory=RedisSettings)
+    rag_cache: RAGCacheSettings = Field(default_factory=RAGCacheSettings)
+    langfuse: LangfuseSettings = Field(default_factory=LangfuseSettings)
     ollama: OllamaSettings = Field(default_factory=OllamaSettings)
     rag: RAGSettings = Field(default_factory=RAGSettings)
     ui: UISettings = Field(default_factory=UISettings)
