@@ -1,5 +1,17 @@
 """Pydantic schemas."""
 
+from paperforge.schemas.hybrid_search import (
+    HybridBulkIndexResult,
+    HybridChunkDocument,
+    HybridIndexReport,
+    HybridIndexStats,
+    HybridSearchHit,
+    HybridSearchRequest,
+    HybridSearchResponse,
+    ResolvedSearchMode,
+    SearchMode,
+    TextChunk,
+)
 from paperforge.schemas.papers import (
     ArxivPaper,
     DocumentSection,
@@ -23,15 +35,25 @@ __all__ = [
     "ArxivPaper",
     "BulkIndexResult",
     "DocumentSection",
+    "HybridBulkIndexResult",
+    "HybridChunkDocument",
+    "HybridIndexReport",
+    "HybridIndexStats",
+    "HybridSearchHit",
+    "HybridSearchRequest",
+    "HybridSearchResponse",
     "IngestionIssue",
     "IngestionReport",
     "PaperSearchDocument",
     "PaperUpsert",
     "ParsedDocument",
+    "ResolvedSearchMode",
     "SearchHit",
     "SearchIndexReport",
     "SearchIndexStats",
+    "SearchMode",
     "SearchRequest",
     "SearchResponse",
     "SearchSort",
+    "TextChunk",
 ]

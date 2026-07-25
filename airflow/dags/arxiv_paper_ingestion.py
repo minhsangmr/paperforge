@@ -1,4 +1,4 @@
-"""Daily Week 3 ingestion and BM25 indexing DAG."""
+"""Daily Week 4 ingestion, BM25 indexing, and hybrid chunk indexing DAG."""
 
 import os
 import subprocess
@@ -61,12 +61,31 @@ def index_search_documents(updated_since: str) -> None:
 
 
 @task
+def index_hybrid_chunks(updated_since: str) -> None:
+    """Chunk and embed newly updated papers for Week 4 hybrid search."""
+
+    subprocess.run(
+        [
+            _PAPERFORGE_CLI,
+            "hybrid-index",
+            "--updated-since",
+            updated_since,
+            "--refresh",
+            "--fail-on-errors",
+        ],
+        check=True,
+        env=_paperforge_environment(),
+    )
+
+
+@task
 def report_pipeline_stats() -> None:
-    """Emit PostgreSQL and OpenSearch counts into the task log."""
+    """Emit PostgreSQL and both OpenSearch index counts into the task log."""
 
     environment = _paperforge_environment()
     subprocess.run([_PAPERFORGE_CLI, "stats"], check=True, env=environment)
     subprocess.run([_PAPERFORGE_CLI, "search-stats"], check=True, env=environment)
+    subprocess.run([_PAPERFORGE_CLI, "hybrid-stats"], check=True, env=environment)
 
 
 @task
@@ -87,7 +106,7 @@ def cleanup_old_pdf_cache() -> int:
 
 with DAG(
     dag_id="paperforge_arxiv_ingestion",
-    description="Fetch arXiv papers, parse PDFs, persist PostgreSQL, and index BM25 search",
+    description="Fetch, parse, persist, then index BM25 and RRF hybrid search",
     start_date=datetime(2026, 7, 24, tzinfo=UTC),
     schedule="0 6 * * 1-5",
     catchup=False,
@@ -97,11 +116,12 @@ with DAG(
         "retries": 2,
         "retry_delay": timedelta(minutes=30),
     },
-    tags=["paperforge", "arxiv", "docling", "opensearch", "bm25", "week3"],
+    tags=["paperforge", "arxiv", "docling", "opensearch", "hybrid", "week4"],
 ) as dag:
     ingest = ingest_previous_interval("{{ ds_nodash }}")
     index = index_search_documents("{{ data_interval_start.isoformat() }}")
+    hybrid = index_hybrid_chunks("{{ data_interval_start.isoformat() }}")
     report = report_pipeline_stats()
     cleanup = cleanup_old_pdf_cache()
 
-    ingest >> index >> report >> cleanup
+    ingest >> index >> hybrid >> report >> cleanup

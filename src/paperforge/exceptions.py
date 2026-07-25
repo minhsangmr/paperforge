@@ -47,3 +47,15 @@ class SearchIndexSchemaError(SearchError):
 
 class SearchUnavailableError(SearchError):
     """OpenSearch could not complete a search operation."""
+
+
+class EmbeddingError(PaperforgeError):
+    """Base error for embedding-provider operations."""
+
+
+class EmbeddingUnavailableError(EmbeddingError):
+    """Embedding generation is disabled or not configured."""
+
+
+class EmbeddingResponseError(EmbeddingError):
+    """The embedding provider returned an unusable response."""
