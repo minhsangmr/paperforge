@@ -2,6 +2,7 @@
 
 import json
 import logging
+import sys
 from datetime import UTC, datetime
 from typing import Any
 
@@ -22,11 +23,17 @@ class JsonFormatter(logging.Formatter):
             "message": record.getMessage(),
             "request_id": get_request_id(),
         }
+
         for key, value in record.__dict__.items():
             if key not in _STANDARD_FIELDS and not key.startswith("_"):
                 payload[key] = value
-        if record.exc_info is not None:
-            payload["exception"] = self.formatException(record.exc_info)
+
+        raw_exc_info: Any = record.exc_info
+        if raw_exc_info:
+            exc_info = sys.exc_info() if raw_exc_info is True else raw_exc_info
+            if isinstance(exc_info, tuple) and exc_info[0] is not None:
+                payload["exception"] = self.formatException(exc_info)
+
         return json.dumps(payload, default=str, ensure_ascii=False)
 
 
