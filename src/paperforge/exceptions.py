@@ -35,3 +35,15 @@ class DocumentValidationError(DocumentParsingError):
 
 class IngestionPipelineError(PaperforgeError):
     """The ingestion run could not complete its top-level operation."""
+
+
+class SearchError(PaperforgeError):
+    """Base error for search-index and query operations."""
+
+
+class SearchIndexSchemaError(SearchError):
+    """The configured OpenSearch index has an incompatible schema."""
+
+
+class SearchUnavailableError(SearchError):
+    """OpenSearch could not complete a search operation."""

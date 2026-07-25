@@ -1,4 +1,4 @@
-"""Idempotent Week 1 infrastructure bootstrap command."""
+"""Idempotent OpenSearch bootstrap command."""
 
 import json
 
@@ -7,7 +7,7 @@ from paperforge.infrastructure.opensearch import OpenSearchClient
 
 
 def main() -> None:
-    """Create the base OpenSearch index when search is enabled."""
+    """Create the versioned BM25 index when search is enabled."""
 
     settings = get_settings()
     if not settings.opensearch.enabled:
@@ -17,6 +17,7 @@ def main() -> None:
     client = OpenSearchClient(settings.opensearch)
     try:
         created = client.ensure_index()
+        schema_version = client.index_schema_version()
     finally:
         client.close()
 
@@ -25,6 +26,7 @@ def main() -> None:
             {
                 "opensearch": "created" if created else "already_exists",
                 "index": settings.opensearch.index_name,
+                "schema_version": schema_version,
             }
         )
     )
