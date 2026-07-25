@@ -112,3 +112,23 @@ def test_stream_emits_metadata_tokens_and_done() -> None:
     events = asyncio.run(collect())
     assert [event.event for event in events] == ["metadata", "token", "token", "done"]
     assert events[-1].data["answer"] == "Grounded answer"
+
+
+def test_stream_no_context_finishes_without_ollama() -> None:
+    retrieval = MagicMock()
+    retrieval.search = AsyncMock(return_value=_retrieval_response(hits=False))
+    ollama = MagicMock()
+    settings = RAGSettings(no_context_answer="No grounded evidence.")
+    service = RAGService(
+        cast(HybridSearchService, retrieval),
+        cast(OllamaClient, ollama),
+        settings,
+    )
+
+    async def collect() -> list[RAGStreamEvent]:
+        return [event async for event in service.stream(RAGRequest(query="Unknown topic"))]
+
+    events = asyncio.run(collect())
+    assert [event.event for event in events] == ["metadata", "done"]
+    assert events[-1].data["answer"] == "No grounded evidence."
+    ollama.generate_stream.assert_not_called()

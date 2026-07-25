@@ -1,15 +1,16 @@
 SHELL := /bin/bash
 COMPOSE := docker compose
+OBS_COMPOSE := docker compose -f compose.yaml -f compose.langfuse.yaml
 RUN_API := $(COMPOSE) run --rm --no-deps api
 RUN_INGEST := $(COMPOSE) --profile core --profile search --profile ingestion run --rm ingestion
 RUN_UI := $(COMPOSE) --profile app-ui run --rm --no-deps gradio
 
 .DEFAULT_GOAL := help
 
-.PHONY: help verify-host bootstrap build build-ingestion build-airflow build-runtime up up-infra up-week1 up-week2 up-week3 up-week4 up-week5 up-llm up-ui up-airflow up-search-ui wait-infra migrate migration search-init infra-init down reset ps logs airflow-logs shell ingestion-shell sync sync-ingestion sync-ui lock format format-check lint typecheck test test-cov test-component test-external test-docling check health readiness container-info compose-config ingest ingest-metadata ingest-date stats search-index search-rebuild search-stats search-query hybrid-index hybrid-index-text hybrid-rebuild hybrid-stats hybrid-query ollama-pull ollama-models rag-ask rag-stream airflow-dags airflow-errors
+.PHONY: help verify-host bootstrap build build-ingestion build-airflow build-runtime up up-infra up-week1 up-week2 up-week3 up-week4 up-week5 up-week6 up-observability observability-secrets observability-health observability-logs cache-stats cache-invalidate feedback up-llm up-ui up-airflow up-search-ui wait-infra migrate migration search-init infra-init down reset ps logs airflow-logs shell ingestion-shell sync sync-ingestion sync-ui lock format format-check lint typecheck test test-cov test-component test-external test-docling check health readiness container-info compose-config ingest ingest-metadata ingest-date stats search-index search-rebuild search-stats search-query hybrid-index hybrid-index-text hybrid-rebuild hybrid-stats hybrid-query ollama-pull ollama-models rag-ask rag-stream airflow-dags airflow-errors
 
 help: ## Show available commands
-	@awk 'BEGIN {FS = ":.*## "; printf "\nPaperforge Week 5 commands:\n\n"} /^[a-zA-Z0-9_-]+:.*## / {printf "  %-22s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
+	@awk 'BEGIN {FS = ":.*## "; printf "\nPaperforge Week 6 commands:\n\n"} /^[a-zA-Z0-9_-]+:.*## / {printf "  %-22s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
 verify-host: ## Verify host tools; never installs Python
 	@bash scripts/verify-host.sh
@@ -83,6 +84,25 @@ up-week5: ## Start retrieval, Ollama, API, and the Gradio application
 	$(COMPOSE) up --build -d api
 	@$(MAKE) up-ui
 
+observability-secrets: ## Generate random Langfuse secrets inside Linux
+	$(RUN_API) uv run python scripts/generate-observability-secrets.py
+
+up-observability: ## Start the isolated self-hosted Langfuse v3 stack
+	@test -f .env || cp .env.example .env
+	$(OBS_COMPOSE) --profile observability up -d langfuse-postgres langfuse-clickhouse langfuse-minio langfuse-redis langfuse-worker langfuse-web
+
+observability-health: ## Check the Langfuse public health endpoint
+	@curl --fail --silent http://localhost:3000/api/public/health && echo
+
+observability-logs: ## Follow Langfuse web and worker logs
+	$(OBS_COMPOSE) --profile observability logs --follow langfuse-web langfuse-worker
+
+up-week6: ## Start Week 5 plus Redis caching and Langfuse observability
+	@$(MAKE) up-week5
+	@$(MAKE) up-observability
+	$(OBS_COMPOSE) up --build -d api
+	$(OBS_COMPOSE) --profile app-ui up --build -d gradio
+
 up-airflow: ## Start local Airflow 3 standalone under the ingestion profile
 	@test -f .env || cp .env.example .env
 	$(COMPOSE) --profile core --profile search --profile ingestion up --build -d postgres opensearch airflow-db-init airflow
@@ -108,13 +128,13 @@ infra-init: ## Apply database migrations and search bootstrap
 	@$(MAKE) search-init
 
 down: ## Stop all known services without deleting data
-	$(COMPOSE) --profile core --profile search --profile search-ui --profile ingestion --profile llm --profile app-ui down
+	$(OBS_COMPOSE) --profile core --profile search --profile search-ui --profile ingestion --profile llm --profile app-ui --profile observability down
 
 reset: ## Stop containers and delete every Paperforge volume
-	$(COMPOSE) --profile core --profile search --profile search-ui --profile ingestion --profile llm --profile app-ui down --volumes --remove-orphans
+	$(OBS_COMPOSE) --profile core --profile search --profile search-ui --profile ingestion --profile llm --profile app-ui --profile observability down --volumes --remove-orphans
 
 ps: ## Show all service states
-	$(COMPOSE) --profile core --profile search --profile search-ui --profile ingestion --profile llm --profile app-ui ps
+	$(OBS_COMPOSE) --profile core --profile search --profile search-ui --profile ingestion --profile llm --profile app-ui --profile observability ps
 
 logs: ## Follow API and Week 1 service logs
 	$(COMPOSE) logs --follow api postgres redis opensearch
@@ -183,8 +203,8 @@ readiness: ## Show dependency readiness from the host
 container-info: ## Verify Python and uv are running on Linux
 	$(RUN_API) bash scripts/verify-container.sh
 
-compose-config: ## Validate all Week 5 Compose profiles
-	$(COMPOSE) --profile core --profile search --profile search-ui --profile ingestion --profile llm --profile app-ui config --quiet
+compose-config: ## Validate all Week 6 Compose profiles
+	$(OBS_COMPOSE) --profile core --profile search --profile search-ui --profile ingestion --profile llm --profile app-ui --profile observability config --quiet
 
 ingest: ## Fetch and parse papers; override with MAX_RESULTS=3
 	$(RUN_INGEST) uv run paperforge ingest --max-results $(or $(MAX_RESULTS),3)
@@ -242,6 +262,20 @@ rag-stream: ## Stream the RAG API as SSE; usage: make rag-stream Q="Explain atte
 		-X POST http://localhost:8000/api/v1/stream \
 		-H 'Content-Type: application/json' \
 		-d '{"query":"$(Q)","top_k":$(or $(TOP_K),3),"use_hybrid":$(or $(HYBRID),true)}'
+
+cache-stats: ## Print Week 6 response-cache counters
+	@curl --fail --silent http://localhost:8000/api/v1/cache/stats | $(COMPOSE) run --rm -T --no-deps api uv run python -m json.tool
+
+cache-invalidate: ## Invalidate exact response; usage: make cache-invalidate Q="What is RAG?" TOP_K=3 HYBRID=false
+	@test -n "$(Q)" || (echo 'Usage: make cache-invalidate Q="question" TOP_K=3 HYBRID=false' && exit 1)
+	@curl --fail --silent -X POST http://localhost:8000/api/v1/cache/invalidate \
+		-H 'Content-Type: application/json' \
+		-d '{"query":"$(Q)","top_k":$(or $(TOP_K),3),"use_hybrid":$(or $(HYBRID),true)}' \
+		| $(COMPOSE) run --rm -T --no-deps api uv run python -m json.tool
+
+feedback: ## Submit Langfuse feedback; usage: make feedback TRACE_ID=... VALUE=1
+	@test -n "$(TRACE_ID)" || (echo 'TRACE_ID is required' && exit 1)
+	@curl --fail --silent -X POST http://localhost:8000/api/v1/feedback -H 'Content-Type: application/json' -d '{"trace_id":"$(TRACE_ID)","value":$(or $(VALUE),1),"comment":"$(COMMENT)"}' | $(COMPOSE) run --rm -T --no-deps api uv run python -m json.tool
 
 airflow-dags: ## List Airflow DAGs and verify the Week 4 DAG appears
 	$(COMPOSE) --profile core --profile search --profile ingestion exec airflow airflow dags list

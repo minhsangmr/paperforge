@@ -17,6 +17,8 @@ class RAGRequest(BaseModel):
     use_hybrid: bool = True
     model: str | None = Field(default=None, min_length=1, max_length=120)
     categories: list[str] = Field(default_factory=list)
+    user_id: str | None = Field(default=None, min_length=1, max_length=120)
+    session_id: str | None = Field(default=None, min_length=1, max_length=120)
 
     @field_validator("query")
     @classmethod
@@ -52,6 +54,18 @@ class RAGRequest(BaseModel):
             if category and category not in seen:
                 seen.add(category)
                 normalized.append(category)
+        return normalized
+
+    @field_validator("user_id", "session_id")
+    @classmethod
+    def normalize_trace_identifier(cls, value: str | None) -> str | None:
+        """Normalize optional correlation identifiers used only for tracing."""
+
+        if value is None:
+            return None
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("trace identifiers cannot be blank")
         return normalized
 
 
@@ -100,6 +114,8 @@ class RAGResponse(BaseModel):
     search_mode: ResolvedSearchMode
     model: str
     usage: OllamaUsage = Field(default_factory=OllamaUsage)
+    cache_hit: bool = False
+    trace_id: str | None = None
 
 
 class RAGStreamEvent(BaseModel):

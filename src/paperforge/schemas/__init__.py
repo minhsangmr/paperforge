@@ -1,5 +1,6 @@
 """Pydantic schemas."""
 
+from paperforge.schemas.cache import CachedRAGPayload, CacheInvalidationResponse, CacheStatsResponse
 from paperforge.schemas.hybrid_search import (
     HybridBulkIndexResult,
     HybridChunkDocument,
@@ -12,6 +13,7 @@ from paperforge.schemas.hybrid_search import (
     SearchMode,
     TextChunk,
 )
+from paperforge.schemas.observability import FeedbackRequest, FeedbackResponse
 from paperforge.schemas.papers import (
     ArxivPaper,
     DocumentSection,
@@ -41,7 +43,12 @@ from paperforge.schemas.search import (
 __all__ = [
     "ArxivPaper",
     "BulkIndexResult",
+    "CacheInvalidationResponse",
+    "CacheStatsResponse",
+    "CachedRAGPayload",
     "DocumentSection",
+    "FeedbackRequest",
+    "FeedbackResponse",
     "HybridBulkIndexResult",
     "HybridChunkDocument",
     "HybridIndexReport",

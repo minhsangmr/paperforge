@@ -35,12 +35,14 @@ class HealthService:
         opensearch: SyncProbe | None,
         redis: SyncProbe | None,
         ollama: AsyncProbe | None,
+        langfuse: AsyncProbe | None = None,
     ) -> None:
         self._settings = settings
         self._database = database
         self._opensearch = opensearch
         self._redis = redis
         self._ollama = ollama
+        self._langfuse = langfuse
 
     async def readiness(self, version: str) -> ReadinessResponse:
         """Return aggregate readiness without raising dependency errors."""
@@ -64,6 +66,12 @@ class HealthService:
                 self._ollama,
                 enabled=self._settings.ollama.enabled,
                 required=self._settings.ollama.required,
+            ),
+            self._optional_async(
+                "langfuse",
+                self._langfuse,
+                enabled=self._settings.langfuse.enabled,
+                required=self._settings.langfuse.required,
             ),
         )
         checks = dict(checks_list)
