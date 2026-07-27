@@ -1436,7 +1436,7 @@ requires-dist = [
     { name = "sqlalchemy", specifier = ">=2.0,<3" },
     { name = "torch", marker = "extra == 'ingestion'", specifier = "==2.13.0", index = "https://download.pytorch.org/whl/cpu" },
     { name = "torchvision", marker = "extra == 'ingestion'", specifier = "==0.28.0", index = "https://download.pytorch.org/whl/cpu" },
-    { name = "uvicorn", extras = ["standard"], specifier = ">=0.34,<1" },
+    { name = "uvicorn", extras = ["standard"], specifier = ">=0.51.0,<1" },
 ]
 provides-extras = ["bot", "ui", "ingestion"]
 
