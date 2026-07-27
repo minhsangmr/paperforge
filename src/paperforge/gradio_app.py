@@ -1,4 +1,4 @@
-"""Containerized Gradio client for the observable, cached RAG API."""
+"""Containerized Gradio client for standard and Agentic RAG."""
 
 import json
 from collections.abc import AsyncIterator
@@ -20,11 +20,24 @@ def _format_answer(answer: str, metadata: dict[str, object]) -> str:
                 title = str(item.get("title", "Untitled"))
                 url = str(item.get("pdf_url", ""))
                 output += f"- [{citation}] [{title}]({url})\n"
+    steps = metadata.get("reasoning_steps")
+    if isinstance(steps, list) and steps:
+        output += "\n\n### Workflow\n"
+        for item in steps:
+            if isinstance(item, dict):
+                output += f"- **{item.get('step', 'step')}**: {item.get('summary', '')}\n"
     mode = metadata.get("search_mode")
     chunks = metadata.get("chunks_used")
-    cache = "hit" if metadata.get("cache_hit") else "miss"
+    cache = metadata.get("cache_hit")
+    cache_text = "n/a" if cache is None else ("hit" if cache else "miss")
     trace_id = metadata.get("trace_id") or "disabled"
-    output += f"\n_Search: {mode}; chunks: {chunks}; cache: {cache}; trace: `{trace_id}`_"
+    status = metadata.get("status") or "completed"
+    attempts = metadata.get("retrieval_attempts")
+    output += (
+        f"\n_Status: {status}; search: {mode}; chunks: {chunks}; "
+        f"attempts: {attempts if attempts is not None else 'n/a'}; "
+        f"cache: {cache_text}; trace: `{trace_id}`_"
+    )
     return output
 
 
@@ -34,8 +47,9 @@ async def stream_answer(
     use_hybrid: bool,
     model: str,
     categories: str,
+    rag_mode: str,
 ) -> AsyncIterator[tuple[str, str]]:
-    """Proxy SSE and expose the trace id for user feedback."""
+    """Call Agentic RAG once or proxy the standard RAG SSE stream."""
 
     if not query.strip():
         yield "Please enter a question.", ""
@@ -48,6 +62,21 @@ async def stream_answer(
         "model": model or None,
         "categories": [item.strip() for item in categories.split(",") if item.strip()],
     }
+    if rag_mode == "Bounded Agentic RAG":
+        try:
+            async with httpx.AsyncClient(timeout=None) as client:
+                response = await client.post(
+                    f"{settings.ui.api_base_url.rstrip('/')}/agentic-ask", json=payload
+                )
+            response.raise_for_status()
+            data = response.json()
+            if not isinstance(data, dict):
+                raise ValueError("Agentic API returned a non-object response")
+            yield _format_answer(str(data.get("answer", "")), data), str(data.get("trace_id") or "")
+        except (httpx.HTTPError, ValueError) as exc:
+            yield f"Agentic RAG error: {exc}", ""
+        return
+
     answer = ""
     metadata: dict[str, object] = {}
     try:
@@ -111,6 +140,14 @@ def create_interface() -> gr.Blocks:
         trace_id = gr.State("")
         query = gr.Textbox(label="Question", lines=2)
         with gr.Accordion("Retrieval and generation options", open=False):
+            rag_mode = gr.Radio(
+                choices=[
+                    "Standard Streaming RAG",
+                    "Bounded Agentic RAG",
+                ],
+                value="Bounded Agentic RAG",
+                label="RAG mode",
+            )
             top_k = gr.Slider(1, settings.rag.max_top_k, value=settings.rag.default_top_k, step=1)
             use_hybrid = gr.Checkbox(value=True, label="Use hybrid retrieval")
             model = gr.Textbox(value=settings.rag.default_model, label="Ollama model")
@@ -121,7 +158,7 @@ def create_interface() -> gr.Blocks:
             helpful = gr.Button("Helpful")
             unhelpful = gr.Button("Not helpful")
         feedback_status = gr.Markdown()
-        inputs = [query, top_k, use_hybrid, model, categories]
+        inputs = [query, top_k, use_hybrid, model, categories, rag_mode]
         submit.click(stream_answer, inputs=inputs, outputs=[answer, trace_id])
         query.submit(stream_answer, inputs=inputs, outputs=[answer, trace_id])
         helpful.click(submit_positive_feedback, inputs=trace_id, outputs=feedback_status)
