@@ -10,6 +10,7 @@ from typing import Any
 import httpx
 
 from paperforge.core.config import LangfuseSettings
+from paperforge.schemas.agentic import AgenticRAGRequest
 from paperforge.schemas.observability import FeedbackRequest
 from paperforge.schemas.rag import RAGRequest
 
@@ -183,6 +184,54 @@ class LangfuseObservability:
                 name="paperforge-rag",
                 as_type="chain",
                 input=input_data,
+                metadata=metadata,
+                version=self.settings.release,
+            ) as root:
+                trace_id = self._client.get_current_trace_id()
+                session = TraceSession(
+                    client=self._client,
+                    root=root,
+                    trace_id=trace_id,
+                    capture_content=self.settings.capture_content,
+                )
+                try:
+                    yield session
+                except BaseException as exc:
+                    session.mark_error(exc)
+                    raise
+        except BaseException:
+            raise
+
+    @contextmanager
+    def trace_agentic(self, request: AgenticRAGRequest) -> Iterator[TraceSession]:
+        """Create one root trace for a bounded Agentic RAG graph execution."""
+
+        if not self.enabled:
+            yield TraceSession(
+                client=None,
+                root=None,
+                trace_id=None,
+                capture_content=self.settings.capture_content,
+            )
+            return
+
+        assert self._client is not None
+        metadata: dict[str, object] = {
+            "top_k": request.top_k,
+            "use_hybrid": request.use_hybrid,
+            "categories": request.categories,
+            "max_retrieval_attempts": request.max_retrieval_attempts,
+            "workflow": "agentic-rag",
+        }
+        if request.user_id is not None:
+            metadata["user_id"] = request.user_id
+        if request.session_id is not None:
+            metadata["session_id"] = request.session_id
+        try:
+            with self._client.start_as_current_observation(
+                name="paperforge-agentic-rag",
+                as_type="agent",
+                input=self._content_or_summary(request.query, label="query"),
                 metadata=metadata,
                 version=self.settings.release,
             ) as root:
