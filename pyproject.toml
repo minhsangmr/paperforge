@@ -43,7 +43,7 @@ paperforge = "paperforge.cli:main"
 
 [dependency-groups]
 dev = [
-  "mypy>=1.15,<2",
+  "mypy>=2.3.0,<3",
   "pytest>=8.3,<10",
   "pytest-asyncio>=0.26,<2",
   "pytest-cov>=6,<8",
