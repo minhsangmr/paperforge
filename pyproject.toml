@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "paperforge"
-version = "0.7.0"
+version = "1.0.0"
 description = "A container-first agentic RAG system for academic papers."
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
@@ -16,6 +16,7 @@ dependencies = [
   "fastapi>=0.115,<1",
   "httpx>=0.28,<1",
   "langfuse>=4,<5",
+  "langgraph>=1,<2",
   "opensearch-py>=2.8,<4",
   "psycopg[binary]>=3.2,<4",
   "pydantic-settings>=2.8,<3",
@@ -25,6 +26,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+bot = [
+  "python-telegram-bot>=22,<23",
+]
 ui = [
   "gradio>=5.35,<6",
 ]
@@ -67,6 +71,8 @@ omit = [
   "src/paperforge/cli.py",
   "src/paperforge/infrastructure/bootstrap.py",
   "src/paperforge/gradio_app.py",
+  "src/paperforge/services/telegram/bot.py",
+  "src/paperforge/telegram_app.py",
   "src/paperforge/services/observability/langfuse.py",
 ]
 
@@ -102,7 +108,7 @@ init_typed = true
 warn_required_dynamic_aliases = true
 
 [[tool.mypy.overrides]]
-module = ["docling.*", "gradio.*", "langfuse.*", "opensearchpy.*", "redis.*"]
+module = ["docling.*", "gradio.*", "langfuse.*", "langgraph.*", "opensearchpy.*", "redis.*", "telegram.*"]
 ignore_missing_imports = true
 
 [tool.uv.sources]

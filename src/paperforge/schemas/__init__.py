@@ -1,5 +1,12 @@
 """Pydantic schemas."""
 
+from paperforge.schemas.agentic import (
+    AgenticRAGRequest,
+    AgenticRAGResponse,
+    AgenticReasoningStep,
+    DocumentGrade,
+    GuardrailResult,
+)
 from paperforge.schemas.cache import CachedRAGPayload, CacheInvalidationResponse, CacheStatsResponse
 from paperforge.schemas.hybrid_search import (
     HybridBulkIndexResult,
@@ -41,14 +48,19 @@ from paperforge.schemas.search import (
 )
 
 __all__ = [
+    "AgenticRAGRequest",
+    "AgenticRAGResponse",
+    "AgenticReasoningStep",
     "ArxivPaper",
     "BulkIndexResult",
     "CacheInvalidationResponse",
     "CacheStatsResponse",
     "CachedRAGPayload",
+    "DocumentGrade",
     "DocumentSection",
     "FeedbackRequest",
     "FeedbackResponse",
+    "GuardrailResult",
     "HybridBulkIndexResult",
     "HybridChunkDocument",
     "HybridIndexReport",

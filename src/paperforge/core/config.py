@@ -108,7 +108,7 @@ class LangfuseSettings(FrozenSettingsModel):
     flush_interval_seconds: float = Field(default=5.0, gt=0, le=60)
     sample_rate: float = Field(default=1.0, ge=0, le=1)
     tracing_environment: str = "development"
-    release: str = "0.7.0"
+    release: str = "1.0.0"
     capture_content: bool = False
     score_name: str = "user-feedback"
 
@@ -182,7 +182,7 @@ class ArxivSettings(FrozenSettingsModel):
     rate_limit_seconds: float = Field(default=3.0, ge=3.0, le=60)
     max_retries: int = Field(default=3, ge=1, le=10)
     retry_backoff_seconds: float = Field(default=2.0, gt=0, le=60)
-    user_agent: str = "paperforge/0.7.0"
+    user_agent: str = "paperforge/1.0.0"
     pdf_cache_dir: Path = Path("/workspace/data/arxiv_pdfs")
     max_pdf_download_mb: int = Field(default=25, ge=1, le=200)
 
@@ -288,6 +288,59 @@ class HybridSearchSettings(FrozenSettingsModel):
         return self
 
 
+class AgenticSettings(FrozenSettingsModel):
+    """Bounded LangGraph decision and retry settings."""
+
+    enabled: bool = True
+    default_model: str = "llama3.2:1b"
+    default_top_k: int = Field(default=3, ge=1, le=10)
+    max_top_k: int = Field(default=10, ge=1, le=20)
+    max_retrieval_attempts: int = Field(default=2, ge=1, le=5)
+    guardrail_threshold: int = Field(default=60, ge=0, le=100)
+    max_grading_characters: int = Field(default=12000, ge=1000, le=50000)
+    out_of_scope_answer: str = (
+        "I can help with academic computer-science and AI research questions. "
+        "Please ask about a technical topic or indexed research papers."
+    )
+    no_context_answer: str = (
+        "I could not find sufficiently relevant indexed paper excerpts after the "
+        "configured retrieval attempts. Try a more specific technical question."
+    )
+
+    @model_validator(mode="after")
+    def validate_top_k(self) -> Self:
+        if self.default_top_k > self.max_top_k:
+            raise ValueError("default_top_k cannot exceed max_top_k")
+        return self
+
+
+class TelegramSettings(FrozenSettingsModel):
+    """Separate Telegram polling-process settings."""
+
+    enabled: bool = False
+    bot_token: SecretStr | None = None
+    api_base_url: str = "http://api:8000/api/v1"
+    request_timeout_seconds: float = Field(default=180.0, gt=0, le=600)
+    max_message_characters: int = Field(default=3800, ge=500, le=4096)
+    allowed_user_ids: list[int] = Field(default_factory=list)
+    drop_pending_updates: bool = True
+
+    @field_validator("bot_token", mode="before")
+    @classmethod
+    def blank_token_is_none(cls, value: object) -> object:
+        if isinstance(value, SecretStr):
+            return None if not value.get_secret_value().strip() else value
+
+        if isinstance(value, str):
+            return None if not value.strip() else value
+
+        return value
+
+    @property
+    def configured(self) -> bool:
+        return self.enabled and self.bot_token is not None
+
+
 class Settings(BaseSettings):
     """Environment-driven settings for Paperforge."""
 
@@ -315,6 +368,8 @@ class Settings(BaseSettings):
     langfuse: LangfuseSettings = Field(default_factory=LangfuseSettings)
     ollama: OllamaSettings = Field(default_factory=OllamaSettings)
     rag: RAGSettings = Field(default_factory=RAGSettings)
+    agentic: AgenticSettings = Field(default_factory=AgenticSettings)
+    telegram: TelegramSettings = Field(default_factory=TelegramSettings)
     ui: UISettings = Field(default_factory=UISettings)
     arxiv: ArxivSettings = Field(default_factory=ArxivSettings)
     document_parser: DocumentParserSettings = Field(default_factory=DocumentParserSettings)
