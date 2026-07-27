@@ -4,13 +4,14 @@ OBS_COMPOSE := docker compose -f compose.yaml -f compose.langfuse.yaml
 RUN_API := $(COMPOSE) run --rm --no-deps api
 RUN_INGEST := $(COMPOSE) --profile core --profile search --profile ingestion run --rm ingestion
 RUN_UI := $(COMPOSE) --profile app-ui run --rm --no-deps gradio
+RUN_BOT := $(COMPOSE) --profile bot run --rm --no-deps telegram
 
 .DEFAULT_GOAL := help
 
-.PHONY: help verify-host bootstrap build build-ingestion build-airflow build-runtime up up-infra up-week1 up-week2 up-week3 up-week4 up-week5 up-week6 up-observability observability-secrets observability-health observability-logs cache-stats cache-invalidate feedback up-llm up-ui up-airflow up-search-ui wait-infra migrate migration search-init infra-init down reset ps logs airflow-logs shell ingestion-shell sync sync-ingestion sync-ui lock format format-check lint typecheck test test-cov test-component test-external test-docling check health readiness container-info compose-config ingest ingest-metadata ingest-date stats search-index search-rebuild search-stats search-query hybrid-index hybrid-index-text hybrid-rebuild hybrid-stats hybrid-query ollama-pull ollama-models rag-ask rag-stream airflow-dags airflow-errors
+.PHONY: help verify-host bootstrap build build-ingestion build-airflow build-runtime up up-infra up-week1 up-week2 up-week3 up-week4 up-week5 up-week6 up-week7 up-bot up-observability observability-secrets observability-health observability-logs cache-stats cache-invalidate feedback up-llm up-ui up-airflow up-search-ui wait-infra migrate migration search-init infra-init down reset ps logs airflow-logs shell ingestion-shell sync sync-ingestion sync-ui sync-bot lock format format-check lint typecheck test test-cov test-component test-external test-docling check health readiness container-info compose-config ingest ingest-metadata ingest-date stats search-index search-rebuild search-stats search-query hybrid-index hybrid-index-text hybrid-rebuild hybrid-stats hybrid-query ollama-pull ollama-models rag-ask rag-stream agentic-ask telegram-logs telegram-status airflow-dags airflow-errors
 
 help: ## Show available commands
-	@awk 'BEGIN {FS = ":.*## "; printf "\nPaperforge Week 6 commands:\n\n"} /^[a-zA-Z0-9_-]+:.*## / {printf "  %-22s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
+	@awk 'BEGIN {FS = ":.*## "; printf "\nPaperforge Week 7 commands:\n\n"} /^[a-zA-Z0-9_-]+:.*## / {printf "  %-22s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
 verify-host: ## Verify host tools; never installs Python
 	@bash scripts/verify-host.sh
@@ -103,6 +104,16 @@ up-week6: ## Start Week 5 plus Redis caching and Langfuse observability
 	$(OBS_COMPOSE) up --build -d api
 	$(OBS_COMPOSE) --profile app-ui up --build -d gradio
 
+up-bot: ## Start the dedicated Telegram polling process
+	@test -f .env || cp .env.example .env
+	$(COMPOSE) --profile bot up --build -d telegram
+
+up-week7: ## Start Week 6 plus bounded Agentic RAG and optional Telegram
+	@$(MAKE) up-week6
+	$(OBS_COMPOSE) up --build -d api
+	$(OBS_COMPOSE) --profile app-ui up --build -d gradio
+	@if grep -Eq '^PAPERFORGE_TELEGRAM__ENABLED=(true|True|1)$$' .env; then $(MAKE) up-bot; fi
+
 up-airflow: ## Start local Airflow 3 standalone under the ingestion profile
 	@test -f .env || cp .env.example .env
 	$(COMPOSE) --profile core --profile search --profile ingestion up --build -d postgres opensearch airflow-db-init airflow
@@ -128,13 +139,13 @@ infra-init: ## Apply database migrations and search bootstrap
 	@$(MAKE) search-init
 
 down: ## Stop all known services without deleting data
-	$(OBS_COMPOSE) --profile core --profile search --profile search-ui --profile ingestion --profile llm --profile app-ui --profile observability down
+	$(OBS_COMPOSE) --profile core --profile search --profile search-ui --profile ingestion --profile llm --profile app-ui --profile observability --profile bot down
 
 reset: ## Stop containers and delete every Paperforge volume
-	$(OBS_COMPOSE) --profile core --profile search --profile search-ui --profile ingestion --profile llm --profile app-ui --profile observability down --volumes --remove-orphans
+	$(OBS_COMPOSE) --profile core --profile search --profile search-ui --profile ingestion --profile llm --profile app-ui --profile observability --profile bot down --volumes --remove-orphans
 
 ps: ## Show all service states
-	$(OBS_COMPOSE) --profile core --profile search --profile search-ui --profile ingestion --profile llm --profile app-ui --profile observability ps
+	$(OBS_COMPOSE) --profile core --profile search --profile search-ui --profile ingestion --profile llm --profile app-ui --profile observability --profile bot ps
 
 logs: ## Follow API and Week 1 service logs
 	$(COMPOSE) logs --follow api postgres redis opensearch
@@ -155,6 +166,10 @@ sync: ## Sync lightweight dependencies from committed uv.lock
 sync-ui: ## Sync Gradio in its isolated Linux venv
 	@test -f uv.lock || (echo "uv.lock is missing; run make lock" && exit 1)
 	$(RUN_UI) uv sync --frozen --extra ui
+
+sync-bot: ## Sync Telegram dependencies in the bot Linux venv
+	@test -f uv.lock || (echo "uv.lock is missing; run make lock" && exit 1)
+	$(RUN_BOT) uv sync --frozen --extra bot
 
 sync-ingestion: ## Sync Docling and CPU-only PyTorch in the isolated ingestion venv
 	@test -f uv.lock || (echo "uv.lock is missing; run make lock" && exit 1)
@@ -203,8 +218,8 @@ readiness: ## Show dependency readiness from the host
 container-info: ## Verify Python and uv are running on Linux
 	$(RUN_API) bash scripts/verify-container.sh
 
-compose-config: ## Validate all Week 6 Compose profiles
-	$(OBS_COMPOSE) --profile core --profile search --profile search-ui --profile ingestion --profile llm --profile app-ui --profile observability config --quiet
+compose-config: ## Validate all Week 7 Compose profiles
+	$(OBS_COMPOSE) --profile core --profile search --profile search-ui --profile ingestion --profile llm --profile app-ui --profile observability --profile bot config --quiet
 
 ingest: ## Fetch and parse papers; override with MAX_RESULTS=3
 	$(RUN_INGEST) uv run paperforge ingest --max-results $(or $(MAX_RESULTS),3)
@@ -262,6 +277,20 @@ rag-stream: ## Stream the RAG API as SSE; usage: make rag-stream Q="Explain atte
 		-X POST http://localhost:8000/api/v1/stream \
 		-H 'Content-Type: application/json' \
 		-d '{"query":"$(Q)","top_k":$(or $(TOP_K),3),"use_hybrid":$(or $(HYBRID),true)}'
+
+agentic-ask: ## Run bounded Agentic RAG; usage: make agentic-ask Q="Explain RRF"
+	@test -n "$(Q)" || (echo 'Usage: make agentic-ask Q="question"' && exit 1)
+	$(COMPOSE) exec -T api curl --fail --silent --show-error \
+		-X POST http://localhost:8000/api/v1/agentic-ask \
+		-H 'Content-Type: application/json' \
+		-d '{"query":"$(Q)","top_k":$(or $(TOP_K),3),"use_hybrid":$(or $(HYBRID),true),"max_retrieval_attempts":$(or $(ATTEMPTS),2)}'
+	@echo
+
+telegram-logs: ## Follow the dedicated Telegram polling-process logs
+	$(COMPOSE) --profile bot logs --follow telegram
+
+telegram-status: ## Show the Telegram container state
+	$(COMPOSE) --profile bot ps telegram
 
 cache-stats: ## Print Week 6 response-cache counters
 	@curl --fail --silent http://localhost:8000/api/v1/cache/stats | $(COMPOSE) run --rm -T --no-deps api uv run python -m json.tool

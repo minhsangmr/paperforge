@@ -2,6 +2,7 @@
 
 from fastapi import APIRouter
 
+from paperforge.api.routes.agentic import router as agentic_router
 from paperforge.api.routes.cache import router as cache_router
 from paperforge.api.routes.feedback import router as feedback_router
 from paperforge.api.routes.health import router as health_router
@@ -11,6 +12,7 @@ from paperforge.api.routes.search import router as search_router
 
 api_router = APIRouter(prefix="/api/v1")
 api_router.include_router(health_router)
+api_router.include_router(agentic_router)
 api_router.include_router(hybrid_search_router)
 api_router.include_router(search_router)
 api_router.include_router(rag_router)

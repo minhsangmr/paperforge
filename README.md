@@ -1,8 +1,8 @@
 # Paperforge
 
-Paperforge is a container-first academic-paper ingestion and RAG project rebuilt from a course template with a production-oriented architecture.
+Paperforge is a container-first academic-paper ingestion and Agentic RAG project rebuilt from a course template with a production-oriented Linux architecture.
 
-## Current milestone: Week 6
+## Current milestone: Week 7 / v1.0.0
 
 The repository now provides:
 
@@ -11,44 +11,77 @@ The repository now provides:
 - Paper-level BM25 plus chunk-level BM25/vector/RRF hybrid retrieval.
 - Local Ollama generation, stable `[S1]` citations, SSE streaming, and Gradio.
 - Parameter-aware exact-match RAG response caching in application Redis.
-- Configurable cache TTL, safe cache failure fallback, cache counters, and exact invalidation.
-- Langfuse v4 tracing for cache, retrieval, prompt, and generation stages.
-- Trace IDs in complete and streaming API responses.
-- User feedback scores attached to Langfuse traces.
-- A separate self-hosted Langfuse Compose stack with its own Postgres, ClickHouse, Redis, and MinIO.
-- Content capture disabled by default so prompts and answers are represented by hashes and lengths unless explicitly enabled.
+- Langfuse tracing and trace-linked user feedback.
+- A bounded LangGraph workflow with scope guardrail, retrieval, relevance grading, query rewriting, and guaranteed termination.
+- `POST /api/v1/agentic-ask` plus a compatibility alias at `/api/v1/ask-agentic`.
+- A dedicated Telegram polling container that calls the Agentic API instead of running inside FastAPI workers.
+- Gradio support for both standard streaming RAG and bounded Agentic RAG.
+
+## Week 7 workflow
+
+```text
+question
+   ↓
+guardrail
+   ├── out of scope → safe response
+   └── accepted
+          ↓
+       retrieve
+          ↓
+    grade documents
+       ├── relevant → grounded answer
+       └── not relevant
+              ↓
+         rewrite query
+              ↓
+       bounded retry loop
+              ↓
+   answer or no-context response
+```
+
+The public `reasoning_steps` field contains concise workflow summaries, not private model chain-of-thought.
 
 ## Development rules
 
 - macOS runs only VS Code, Git, and Docker Desktop.
-- Python, uv, tests, FastAPI, Gradio, Docling, PyTorch, Airflow, and service clients run in Linux containers.
+- Python, uv, tests, FastAPI, Gradio, Docling, PyTorch, Airflow, LangGraph, and Telegram run in Linux containers.
 - `.venv` is stored in Docker volumes, never on the macOS host.
 - Secrets live only in ignored `.env` or an external secret manager.
 - PostgreSQL is source-of-truth state; OpenSearch indexes and Redis cache entries are derived state.
-- The application Redis and Langfuse Redis are intentionally separate services.
-- Week 6 does not add LangGraph query rewriting/grading or Telegram; those remain Week 7.
+- Telegram polling runs in exactly one dedicated process and is never started from FastAPI lifespan.
 
-## First Week 6 run
+## First Week 7 run
 
 ```bash
 cp .env.example .env
 make observability-secrets
-# Copy generated values into .env, then configure Jina/Ollama values as needed.
+# Copy generated Langfuse values into .env.
+# Configure Jina, Ollama, and optionally Telegram credentials.
 make build
 make lock
 make sync
 make sync-ui
-make up-week6
+make sync-bot
+make up-week7
 make readiness
-make observability-health
 ```
 
-Verify cache behavior:
+Agentic smoke tests:
 
 ```bash
-make rag-ask Q="What is retrieval-augmented generation?"
-make rag-ask Q="What is retrieval-augmented generation?"
-make cache-stats
+make agentic-ask Q="Explain reciprocal rank fusion"
+make agentic-ask Q="How do I bake bread?"
+```
+
+Optional Telegram:
+
+```bash
+# In .env:
+# PAPERFORGE_TELEGRAM__ENABLED=true
+# PAPERFORGE_TELEGRAM__BOT_TOKEN=<token from BotFather>
+make up-bot
+make telegram-status
+make telegram-logs
 ```
 
 Service URLs:
@@ -71,8 +104,9 @@ Airflow:                   http://localhost:8080
 - `docs/WEEK3_BM25_SEARCH.md`
 - `docs/WEEK4_HYBRID_SEARCH.md`
 - `docs/WEEK5_COMPLETE_RAG.md`
-- `docs/WEEK5_TO_WEEK6_COMPARISON.md`
 - `docs/WEEK6_CACHING_OBSERVABILITY.md`
+- `docs/WEEK6_TO_WEEK7_COMPARISON.md`
+- `docs/WEEK7_AGENTIC_RAG_TELEGRAM.md`
 
 ## Attribution
 

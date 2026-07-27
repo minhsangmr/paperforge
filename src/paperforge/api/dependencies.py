@@ -12,6 +12,7 @@ from paperforge.infrastructure.hybrid_search import HybridSearchClient
 from paperforge.infrastructure.opensearch import OpenSearchClient
 from paperforge.infrastructure.redis import RedisClient
 from paperforge.infrastructure.resources import Infrastructure
+from paperforge.services.agentic.service import AgenticRAGService
 from paperforge.services.cache.rag import RAGCache
 from paperforge.services.embeddings.jina import JinaEmbeddingsClient
 from paperforge.services.health import HealthService
@@ -144,3 +145,20 @@ def get_rag_service(
 
 
 RAGServiceDep = Annotated[RAGService, Depends(get_rag_service)]
+
+
+def get_agentic_rag_service(
+    settings: SettingsDep,
+    retrieval: HybridSearchServiceDep,
+    ollama: OllamaDep,
+    observability: ObservabilityDep,
+) -> AgenticRAGService:
+    if not settings.agentic.enabled:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Agentic RAG is disabled",
+        )
+    return AgenticRAGService(retrieval, ollama, settings.agentic, settings.rag, observability)
+
+
+AgenticRAGServiceDep = Annotated[AgenticRAGService, Depends(get_agentic_rag_service)]
