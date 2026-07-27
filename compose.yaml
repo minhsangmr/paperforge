@@ -252,6 +252,28 @@ services:
       - -m
       - paperforge.gradio_app
 
+  telegram:
+    <<: *app-base
+    profiles: ["bot"]
+    restart: unless-stopped
+    environment:
+      PAPERFORGE_TELEGRAM__API_BASE_URL: http://api:8000/api/v1
+    volumes:
+      - .:/workspace
+      - paperforge_bot_venv:/workspace/.venv
+      - paperforge_uv_cache:/root/.cache/uv
+    depends_on:
+      api:
+        condition: service_healthy
+    command:
+      - uv
+      - run
+      - --extra
+      - bot
+      - python
+      - -m
+      - paperforge.telegram_app
+
 volumes:
   paperforge_venv:
   paperforge_ingestion_venv:
@@ -264,3 +286,4 @@ volumes:
   paperforge_airflow_logs:
   paperforge_ollama:
   paperforge_ui_venv:
+  paperforge_bot_venv:
